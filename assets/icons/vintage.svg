@@ -1,0 +1,18 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- rear wheel -->
+  <circle cx="6.5" cy="23" r="4.5" stroke="currentColor" stroke-width="2"/>
+  <!-- front wheel -->
+  <circle cx="25.5" cy="23" r="4.5" stroke="currentColor" stroke-width="2"/>
+  <!-- frame -->
+  <path d="M11 23L13 16L19 14L24 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- tank - round classic -->
+  <path d="M13 16Q14 11 17 11Q19 11 19 14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- round headlight -->
+  <circle cx="24" cy="14" r="2.5" stroke="currentColor" stroke-width="2"/>
+  <!-- bars -->
+  <path d="M19 11L21 9" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- fender hint -->
+  <path d="M11 18L9 17" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- fork -->
+  <path d="M24 16.5L25 18.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,17 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- rear wheel -->
+  <circle cx="6.5" cy="23" r="4.5" stroke="currentColor" stroke-width="2"/>
+  <!-- front wheel -->
+  <circle cx="25.5" cy="23" r="4.5" stroke="currentColor" stroke-width="2"/>
+  <!-- frame - long low stance -->
+  <path d="M11 23L12 17L18 15L24 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- tank -->
+  <path d="M12 17L14 13L18 12L18 15" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- high bars -->
+  <path d="M19 12L21 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <path d="M21 8L23 7" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- sissy bar / backrest -->
+  <path d="M11 17L10 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- fork - raked out -->
+  <path d="M24 17L25.5 18.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>

@@ -1,0 +1,13 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- rear wheel -->
+  <circle cx="6.5" cy="24" r="4.5" stroke="currentColor" stroke-width="2"/>
+  <!-- front wheel -->
+  <circle cx="25.5" cy="24" r="4.5" stroke="currentColor" stroke-width="2"/>
+  <!-- minimal frame - skeleton/unfinished -->
+  <path d="M11 24L14 16L20 14L25 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="4 3"/>
+  <!-- wrench overlay -->
+  <path d="M14 8L18 12" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <circle cx="13" cy="7" r="2.5" stroke="currentColor" stroke-width="2"/>
+  <path d="M19 13L20 14" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/>
+  <rect x="19.5" y="12.5" width="2" height="4" rx="0.5" transform="rotate(-45 19.5 12.5)" stroke="currentColor" stroke-width="1.5"/>
+</svg>

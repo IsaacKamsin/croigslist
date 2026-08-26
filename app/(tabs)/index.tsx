@@ -1,98 +1,159 @@
-import { Image } from 'expo-image';
-import { Platform, StyleSheet } from 'react-native';
+import {
+  FeatureSection,
+  HeroSection,
+  JustListedSection,
+  ProjectBikesSection,
+  RareFindsSection,
+  ShopsSection,
+  SoldSection,
+  Under5kSection,
+} from "@/components/registry/sections";
+import { COLORS, F, SPACING } from "@/constants/design";
+import { hapticLight } from "@/hooks/useHaptics";
+import { MagnifyingGlassIcon } from "phosphor-react-native";
+import { useAuth } from "@/context/AuthContext";
+import { FEATURED } from "@/data/registry";
+import { useRouter } from "expo-router";
+import React, { useCallback, useState } from "react";
+import { Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 
-import { HelloWave } from '@/components/hello-wave';
-import ParallaxScrollView from '@/components/parallax-scroll-view';
-import { ThemedText } from '@/components/themed-text';
-import { ThemedView } from '@/components/themed-view';
-import { Link } from 'expo-router';
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning,";
+  if (h < 17) return "Good afternoon,";
+  return "Good evening,";
+}
 
-export default function HomeScreen() {
+export default function RegistryScreen() {
+  const router = useRouter();
+  const { member } = useAuth();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const onRefresh = useCallback(() => {
+    setRefreshing(true);
+    // TODO: fetch fresh data from API
+    setTimeout(() => setRefreshing(false), 1200);
+  }, []);
+
+  const goListing = useCallback(
+    (id: string) => router.push(`/listing/${id}`),
+    [router],
+  );
+  const goBuilder = useCallback(
+    (id: string) => router.push(`/builder/${id}`),
+    [router],
+  );
+  const goShop = useCallback(
+    (slug: string) => router.push(`/shop/${slug}`),
+    [router],
+  );
+  const goFeatured = useCallback(() => goListing(FEATURED.id), [goListing]);
+  const goCategory = useCallback(
+    (key: "just-listed" | "under-5k" | "project-bikes") => {
+      hapticLight();
+      router.push(`/listing/category/${key}`);
+    },
+    [router],
+  );
+  const goJustListed = useCallback(() => goCategory("just-listed"), [goCategory]);
+  const goUnder5k = useCallback(() => goCategory("under-5k"), [goCategory]);
+  const goProjectBikes = useCallback(() => goCategory("project-bikes"), [goCategory]);
+  const goAllShops = useCallback(() => {
+    hapticLight();
+    router.push("/(tabs)/shops");
+  }, [router]);
+
   return (
-    <ParallaxScrollView
-      headerBackgroundColor={{ light: '#A1CEDC', dark: '#1D3D47' }}
-      headerImage={
-        <Image
-          source={require('@/assets/images/partial-react-logo.png')}
-          style={styles.reactLogo}
-        />
-      }>
-      <ThemedView style={styles.titleContainer}>
-        <ThemedText type="title">Welcome!</ThemedText>
-        <HelloWave />
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 1: Try it</ThemedText>
-        <ThemedText>
-          Edit <ThemedText type="defaultSemiBold">app/(tabs)/index.tsx</ThemedText> to see changes.
-          Press{' '}
-          <ThemedText type="defaultSemiBold">
-            {Platform.select({
-              ios: 'cmd + d',
-              android: 'cmd + m',
-              web: 'F12',
-            })}
-          </ThemedText>{' '}
-          to open developer tools.
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <Link href="/modal">
-          <Link.Trigger>
-            <ThemedText type="subtitle">Step 2: Explore</ThemedText>
-          </Link.Trigger>
-          <Link.Preview />
-          <Link.Menu>
-            <Link.MenuAction title="Action" icon="cube" onPress={() => alert('Action pressed')} />
-            <Link.MenuAction
-              title="Share"
-              icon="square.and.arrow.up"
-              onPress={() => alert('Share pressed')}
-            />
-            <Link.Menu title="More" icon="ellipsis">
-              <Link.MenuAction
-                title="Delete"
-                icon="trash"
-                destructive
-                onPress={() => alert('Delete pressed')}
-              />
-            </Link.Menu>
-          </Link.Menu>
-        </Link>
+    <SafeAreaView style={s.safe} edges={["top"]}>
+      {/* Header */}
+      <View style={s.header}>
+        <View style={{ flex: 1 }}>
+          <Text style={s.greeting}>{getGreeting()}</Text>
+          <Text style={s.userName}>{member?.name ?? "Member"}</Text>
+        </View>
+        <Pressable
+          style={s.listBtn}
+          onPress={() => router.push("/listing/create")}
+        >
+          <Text style={s.listBtnText}>+ LIST</Text>
+        </Pressable>
+        <Pressable
+          style={s.searchBtn}
+          onPress={() => { hapticLight(); router.push("/(tabs)/search"); }}
+          hitSlop={8}
+        >
+          <MagnifyingGlassIcon color={COLORS.textPrimary} size={20} weight="bold" />
+        </Pressable>
+      </View>
 
-        <ThemedText>
-          {`Tap the Explore tab to learn more about what's included in this starter app.`}
-        </ThemedText>
-      </ThemedView>
-      <ThemedView style={styles.stepContainer}>
-        <ThemedText type="subtitle">Step 3: Get a fresh start</ThemedText>
-        <ThemedText>
-          {`When you're ready, run `}
-          <ThemedText type="defaultSemiBold">npm run reset-project</ThemedText> to get a fresh{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> directory. This will move the current{' '}
-          <ThemedText type="defaultSemiBold">app</ThemedText> to{' '}
-          <ThemedText type="defaultSemiBold">app-example</ThemedText>.
-        </ThemedText>
-      </ThemedView>
-    </ParallaxScrollView>
+      <View style={s.catDivider} />
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={COLORS.accent}
+          />
+        }
+      >
+        <HeroSection onPress={goFeatured} />
+        <JustListedSection goListing={goListing} onSeeAll={goJustListed} />
+        <Under5kSection goListing={goListing} onSeeAll={goUnder5k} />
+        <RareFindsSection goListing={goListing} />
+        <ProjectBikesSection goListing={goListing} onSeeAll={goProjectBikes} />
+        <ShopsSection goShop={goShop} onSeeAll={goAllShops} />
+        <FeatureSection goBuilder={goBuilder} />
+        <SoldSection />
+        <View style={{ height: 40 }} />
+      </ScrollView>
+
+    </SafeAreaView>
   );
 }
 
-const styles = StyleSheet.create({
-  titleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
+const P = SPACING.page;
+const s = StyleSheet.create({
+  safe: { flex: 1, backgroundColor: COLORS.bg },
+  header: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: P,
+    paddingTop: 6,
+    paddingBottom: 10,
+    gap: 12,
   },
-  stepContainer: {
-    gap: 8,
-    marginBottom: 8,
+  greeting: {
+    fontSize: 11,
+    fontFamily: F.mono,
+    color: COLORS.textMuted,
+    letterSpacing: 0.5,
   },
-  reactLogo: {
-    height: 178,
-    width: 290,
-    bottom: 0,
-    left: 0,
-    position: 'absolute',
+  userName: {
+    fontSize: 22,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    letterSpacing: -0.5,
+    marginTop: -1,
+  },
+  listBtn: {
+    backgroundColor: COLORS.accent,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  listBtnText: {
+    fontSize: 10,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.2,
+    color: COLORS.black,
+  },
+  searchBtn: { padding: 6 },
+  catDivider: {
+    height: 1,
+    backgroundColor: COLORS.divider,
+    marginHorizontal: P,
   },
 });

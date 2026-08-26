@@ -1,0 +1,17 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- rear wheel -->
+  <circle cx="6" cy="24" r="4.5" stroke="currentColor" stroke-width="2"/>
+  <!-- front wheel - pushed way out -->
+  <circle cx="27" cy="24" r="3.5" stroke="currentColor" stroke-width="2"/>
+  <!-- frame - long low -->
+  <path d="M10.5 24L12 18L17 16L22 18" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- tank - teardrop -->
+  <path d="M12 18L14 14L17 13L17 16" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- ape hanger bars -->
+  <path d="M17 13L18 9L16 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M18 9L20 6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- extended fork -->
+  <path d="M22 18L27 20.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+  <!-- sissy bar -->
+  <path d="M10 18L9 12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+</svg>

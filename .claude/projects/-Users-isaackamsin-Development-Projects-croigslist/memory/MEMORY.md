@@ -1,0 +1,1 @@
+- [Only change what's asked](feedback_minimal_changes.md) — don't rename/redesign beyond what was requested; default to narrowest interpretation
