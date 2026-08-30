@@ -1,9 +1,8 @@
 /**
- * CROIGSLIST DESIGN SYSTEM — "Registry Modern"
+ * CROIGSLIST DESIGN SYSTEM
  *
- * Cream-first. Industrial. Mechanical. No softness.
- * Space Grotesk (primary) + IBM Plex Mono (registry layer).
- * Acid green (#BFFF00) as signal color.
+ * White-first mobile marketplace UI. Bold black type, simple dividers,
+ * pill CTAs, rounded fields, and product imagery doing most of the work.
  *
  * Every screen imports from here. No hardcoded values.
  */
@@ -13,50 +12,50 @@
 // ═══════════════════════════════════════════
 export const COLORS = {
   white: "#FFFFFF",
-  black: "#1A1A18",
-  bg: "#F6F3ED",
-  surface: "#EDEAE3",
-  surfaceRaised: "#E5E2DA",
+  black: "#242424",
+  bg: "#FFFFFF",
+  surface: "#FFFFFF",
+  surfaceRaised: "#F7F7F7",
 
-  gray100: "#E0DDD5",
-  gray200: "#D0CCC4",
-  gray300: "#B8B4AA",
-  gray400: "#8A8A80",
-  gray500: "#6A6A60",
-  gray600: "#4A4A44",
-  gray700: "#3A3A34",
-  gray800: "#2A2A24",
-  gray900: "#1A1A18",
+  gray100: "#F4F4F4",
+  gray200: "#E7E7E7",
+  gray300: "#C9C9C9",
+  gray400: "#8D8D8D",
+  gray500: "#737373",
+  gray600: "#525252",
+  gray700: "#3A3A3A",
+  gray800: "#2E2E2E",
+  gray900: "#242424",
 
-  accent: "#BFFF00",
-  accentAlt: "#C44A2F",
+  accent: "#E4002B",
+  accentAlt: "#168A0F",
 
-  verified: "#BFFF00",
-  rare: "#C44A2F",
-  sold: "#C44A2F",
-  active: "#BFFF00",
-  live: "#BFFF00",
+  verified: "#168A0F",
+  rare: "#E4002B",
+  sold: "#E4002B",
+  active: "#168A0F",
+  live: "#E4002B",
 
-  error: "#C44A2F",
-  success: "#2D6A4F",
+  error: "#C82A2A",
+  success: "#168A0F",
   warning: "#EAB308",
 
-  textPrimary: "#1A1A18",
-  textSecondary: "#4A4A44",
-  textMuted: "#8A8A80",
-  textFaint: "#B8B4AA",
+  textPrimary: "#242424",
+  textSecondary: "#333333",
+  textMuted: "#747474",
+  textFaint: "#AFAFAF",
 
-  divider: "#E0DDD5",
-  dividerLight: "#EDEAE3",
+  divider: "#E5E5E5",
+  dividerLight: "#F0F0F0",
 
   // Overlays — black (#1A1A18) at opacity
-  overlay10: "rgba(26,26,24,0.1)",
-  overlay35: "rgba(26,26,24,0.35)",
-  overlay50: "rgba(26,26,24,0.5)",
-  overlay75: "rgba(26,26,24,0.75)",
-  overlay78: "rgba(26,26,24,0.78)",
-  overlay85: "rgba(26,26,24,0.85)",
-  overlay90: "rgba(26,26,24,0.9)",
+  overlay10: "rgba(36,36,36,0.1)",
+  overlay35: "rgba(36,36,36,0.35)",
+  overlay50: "rgba(36,36,36,0.5)",
+  overlay75: "rgba(36,36,36,0.75)",
+  overlay78: "rgba(36,36,36,0.78)",
+  overlay85: "rgba(36,36,36,0.85)",
+  overlay90: "rgba(36,36,36,0.9)",
 
   // White at opacity — for text/borders on dark backgrounds
   whiteA25: "rgba(255,255,255,0.25)",
@@ -110,15 +109,15 @@ export const F = {
 // ═══════════════════════════════════════════
 export const TYPE = {
   pageTitle: {
-    fontSize: 28,
+    fontSize: 36,
     fontFamily: F.bold,
-    letterSpacing: -0.5,
+    letterSpacing: 0,
     color: COLORS.textPrimary,
   },
   sectionHeader: {
-    fontSize: 18,
-    fontFamily: F.semibold,
-    letterSpacing: -0.3,
+    fontSize: 22,
+    fontFamily: F.bold,
+    letterSpacing: 0,
     color: COLORS.textPrimary,
   },
   sectionSub: {
@@ -128,36 +127,36 @@ export const TYPE = {
     lineHeight: 15,
   },
   cardTitle: {
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: F.bold,
-    letterSpacing: -0.2,
+    letterSpacing: 0,
     color: COLORS.textPrimary,
   },
   cardMeta: {
-    fontSize: 10,
-    fontFamily: F.mono,
-    letterSpacing: 1,
-    color: COLORS.textFaint,
+    fontSize: 14,
+    fontFamily: F.semibold,
+    letterSpacing: 0,
+    color: COLORS.textMuted,
   },
   cardPrice: {
-    fontSize: 11.5,
-    fontFamily: F.monoMedium,
-    color: COLORS.textSecondary,
+    fontSize: 18,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
   },
   price: {
-    fontSize: 20,
+    fontSize: 26,
     fontFamily: F.bold,
-    letterSpacing: -0.5,
+    letterSpacing: 0,
     color: COLORS.textPrimary,
   },
   body: {
-    fontSize: 15,
+    fontSize: 17,
     fontFamily: F.regular,
-    lineHeight: 22,
+    lineHeight: 25,
     color: COLORS.textPrimary,
   },
   bodySmall: {
-    fontSize: 13,
+    fontSize: 15,
     fontFamily: F.regular,
     lineHeight: 18,
     color: COLORS.textSecondary,
@@ -175,15 +174,15 @@ export const TYPE = {
     color: COLORS.textMuted,
   },
   label: {
-    fontSize: 10,
-    fontFamily: F.monoMedium,
-    letterSpacing: 1,
+    fontSize: 13,
+    fontFamily: F.semibold,
+    letterSpacing: 0,
     color: COLORS.textMuted,
   },
   labelBold: {
-    fontSize: 10,
-    fontFamily: F.monoBold,
-    letterSpacing: 1.2,
+    fontSize: 14,
+    fontFamily: F.bold,
+    letterSpacing: 0,
     color: COLORS.textPrimary,
   },
   tag: {
@@ -210,7 +209,7 @@ export const SPACING = {
   lg: 24,
   xl: 32,
   xxl: 48,
-  page: 24, // horizontal page padding
+  page: 28,
 } as const;
 
 // ═══════════════════════════════════════════

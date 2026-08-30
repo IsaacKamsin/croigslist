@@ -1,7 +1,14 @@
 import { COLORS, F, SPACING } from "@/constants/design";
 import { hapticLight } from "@/hooks/useHaptics";
+import {
+  fetchConversationMessages,
+  sendConversationMessage,
+  type ConversationMessage,
+} from "@/lib/messages-db";
+import { backOrReplace } from "@/lib/navigation";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -14,41 +21,8 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-// ── Mock shop meta — replace with API/store lookup ────────────────
-const SHOP_META: Record<string, { name: string; initials: string }> = {
-  "reincarnation-cycles": { name: "Reincarnation Cycles", initials: "RC" },
-};
-
-interface Message {
-  id: string;
-  text: string;
-  fromMe: boolean;
-  time: string;
-}
-
-const MOCK_MESSAGES: Message[] = [
-  {
-    id: "1",
-    text: "Hey! Interested in the CB550 Cafe — is it still available?",
-    fromMe: true,
-    time: "2h",
-  },
-  {
-    id: "2",
-    text: "Yeah it's still here. You want to come take a look?",
-    fromMe: false,
-    time: "1h",
-  },
-  {
-    id: "3",
-    text: "Definitely. What days work for you?",
-    fromMe: true,
-    time: "45m",
-  },
-];
-
 // ── Bubble ────────────────────────────────────────────────────────
-function Bubble({ msg }: { msg: Message }) {
+function Bubble({ msg }: { msg: ConversationMessage }) {
   return (
     <View style={[styles.bubbleRow, msg.fromMe && styles.bubbleRowMe]}>
       <View
@@ -70,17 +44,37 @@ function Bubble({ msg }: { msg: Message }) {
 
 // ── Screen ────────────────────────────────────────────────────────
 export default function ConversationScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, sellerName } = useLocalSearchParams<{
+    id: string;
+    sellerName?: string;
+  }>();
   const router = useRouter();
-  const shop = SHOP_META[id ?? ""] ?? { name: id ?? "Shop", initials: "?" };
+  const queryClient = useQueryClient();
+  const name = sellerName ?? "Conversation";
+  const initials = name
+    .split(/\s+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
 
-  const [messages, setMessages] = useState<Message[]>(MOCK_MESSAGES);
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [draft, setDraft] = useState("");
   const listRef = useRef<FlatList>(null);
+  const { data: fetchedMessages = [] } = useQuery({
+    queryKey: ["conversation-messages", id],
+    queryFn: () => fetchConversationMessages(id),
+    enabled: Boolean(id),
+    initialData: [] as ConversationMessage[],
+  });
 
-  const send = useCallback(() => {
+  useEffect(() => {
+    setMessages(fetchedMessages);
+  }, [fetchedMessages]);
+
+  const send = useCallback(async () => {
     const text = draft.trim();
-    if (!text) return;
+    if (!text || !id) return;
     hapticLight();
     const msgId = Date.now().toString();
     setMessages((prev) => [
@@ -89,27 +83,33 @@ export default function ConversationScreen() {
     ]);
     setDraft("");
     setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
-    // Simulate send confirmation
-    setTimeout(() => {
+    try {
+      await sendConversationMessage(id, text);
+      queryClient.invalidateQueries({ queryKey: ["message-threads"] });
+      queryClient.invalidateQueries({ queryKey: ["conversation-messages", id] });
       setMessages((prev) =>
         prev.map((m) => (m.id === msgId ? { ...m, time: "now" } : m)),
       );
-    }, 800);
-  }, [draft]);
+    } catch {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, time: "failed" } : m)),
+      );
+    }
+  }, [draft, id, queryClient]);
 
   return (
     <SafeAreaView style={styles.container} edges={["top", "bottom"]}>
       {/* ── Header ── */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} style={styles.backBtn}>
+        <Pressable onPress={() => backOrReplace(router, "/(tabs)/messages")} style={styles.backBtn}>
           <Text style={styles.backText}>‹ BACK</Text>
         </Pressable>
 
         <View style={styles.headerCenter}>
           <View style={styles.headerAvatar}>
-            <Text style={styles.headerAvatarText}>{shop.initials}</Text>
+            <Text style={styles.headerAvatarText}>{initials || "?"}</Text>
           </View>
-          <Text style={styles.headerName}>{shop.name.toUpperCase()}</Text>
+          <Text style={styles.headerName}>{name.toUpperCase()}</Text>
         </View>
 
         <View style={styles.backBtn} />

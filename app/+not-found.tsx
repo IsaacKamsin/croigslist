@@ -26,7 +26,7 @@ const styles = StyleSheet.create({
   code: {
     ...TYPE.pageTitle,
     fontSize: 48,
-    letterSpacing: -2,
+    letterSpacing: 0,
   },
   message: S.emptyTitle,
   button: {

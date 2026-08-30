@@ -1,8 +1,14 @@
+import { StatusState } from "@/components/StatusState";
 import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING, TYPE } from "@/constants/design";
 import { hapticMedium, hapticSelection } from "@/hooks/useHaptics";
 import { S } from "@/constants/styles";
+import { fetchListingById } from "@/lib/registry-db";
+import { formatUsd } from "@/lib/formatters";
+import { startConversation } from "@/lib/messages-db";
+import { backOrReplace } from "@/lib/navigation";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import {
   Dimensions,
@@ -15,42 +21,6 @@ import {
 } from "react-native";
 
 const { width } = Dimensions.get("window");
-
-// ── Mock data ────────────────────────────────────────────────────────
-const MOCK_LISTING = {
-  id: "1",
-  year: 1975,
-  make: "Honda",
-  model: "CB550",
-  price: 4200,
-  city: "Minneapolis",
-  mileage: 23400,
-  rideable: true,
-  rare: false,
-  description:
-    "Clean survivor. Original paint. Carbs rebuilt 2024. New tires, chain, and battery. Runs strong. Title in hand.",
-  images: [
-    "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=900&q=80",
-    "https://images.unsplash.com/photo-1558981285-6f0c94958bb6?w=900&q=80",
-    "https://images.unsplash.com/photo-1609630875171-b1321377ee65?w=900&q=80",
-    "https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?w=900&q=80",
-  ],
-  seller: {
-    id: "u1",
-    name: "Jake Morrison",
-    type: "rider",
-    verified: true,
-    memberSince: "2025",
-  },
-  specs: [
-    { label: "ENGINE", value: "544cc Inline-4" },
-    { label: "TRANSMISSION", value: "4-speed" },
-    { label: "FRAME", value: "Steel twin cradle" },
-    { label: "WEIGHT", value: "423 lbs" },
-    { label: "BRAKES", value: "Disc / Drum" },
-    { label: "FUEL", value: "3.4 gal" },
-  ],
-};
 
 // ── Photo Carousel ───────────────────────────────────────────────────
 function PhotoCarousel({ images, rare }: { images: string[]; rare: boolean }) {
@@ -112,144 +82,153 @@ function PhotoCarousel({ images, rare }: { images: string[]; rare: boolean }) {
   );
 }
 
-// ── Spec Grid ────────────────────────────────────────────────────────
-function SpecGrid({ specs }: { specs: { label: string; value: string }[] }) {
-  return (
-    <View style={styles.specGrid}>
-      {specs.map((spec, i) => (
-        <View key={i} style={styles.specCell}>
-          <Text style={styles.specLabel}>{spec.label}</Text>
-          <Text style={styles.specValue}>{spec.value}</Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
 // ── Main Screen ──────────────────────────────────────────────────────
 export default function ListingDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const listing = MOCK_LISTING;
+  const { data: listing, isPending } = useQuery({
+    queryKey: ["listing", id],
+    queryFn: () => fetchListingById(id),
+    enabled: Boolean(id),
+  });
 
-  const handleMessageSeller = () => {
+  if (isPending) {
+    return (
+      <View style={styles.container}>
+        <StatusState eyebrow="Loading" title="Opening listing" />
+      </View>
+    );
+  }
+
+  if (!listing) {
+    return (
+      <View style={styles.container}>
+        <StatusState
+          eyebrow="Not found"
+          title="Listing unavailable"
+          body="This bike may have sold, been removed, or moved back to draft."
+          actionLabel="GO BACK"
+          onAction={() => backOrReplace(router, "/(tabs)")}
+        />
+      </View>
+    );
+  }
+
+  const images = listing.images?.length ? listing.images : [listing.image];
+  const rideable = listing.condition !== "project";
+  const sellerName = listing.sellerName ?? "Seller";
+  const sellerId = listing.sellerId ?? listing.id;
+
+  const handleMessageSeller = async () => {
     hapticMedium();
+    const conversationId = await startConversation({
+      participantId: listing.sellerId,
+      participantName: sellerName,
+      listingId: listing.id,
+    });
     router.push({
-      pathname: "/messages/[threadId]",
+      pathname: "/messages/[id]",
       params: {
-        threadId: listing.seller.id,
-        sellerName: listing.seller.name,
+        id: conversationId,
+        sellerName,
         listingTitle: `${listing.year} ${listing.make} ${listing.model}`,
       },
     });
   };
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <PhotoCarousel images={listing.images} rare={listing.rare} />
+    <View style={styles.container}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <PhotoCarousel images={images} rare={Boolean(listing.isRare)} />
 
-      {/* Title block */}
-      <View style={styles.titleBlock}>
-        <Text style={styles.year}>{listing.year}</Text>
-        <Text style={styles.title}>
-          {listing.make} {listing.model}
-        </Text>
-        <Text style={styles.price}>${listing.price.toLocaleString()}</Text>
-      </View>
-
-      {/* Quick facts */}
-      <View style={styles.factsRow}>
-        <View style={styles.fact}>
-          <Text style={styles.factValue}>
-            {listing.mileage.toLocaleString()}
+        <View style={styles.titleBlock}>
+          <Text style={styles.title}>
+            {listing.make} {listing.model}
           </Text>
-          <Text style={styles.factLabel}>MILES</Text>
-        </View>
-        <View style={styles.factDivider} />
-        <View style={styles.fact}>
-          <Text style={styles.factValue}>{listing.city.toUpperCase()}</Text>
-          <Text style={styles.factLabel}>LOCATION</Text>
-        </View>
-        <View style={styles.factDivider} />
-        <View style={styles.fact}>
-          <Text
-            style={[
-              styles.factValue,
-              { color: listing.rideable ? COLORS.success : COLORS.error },
-            ]}
-          >
-            {listing.rideable ? "YES" : "NO"}
+          <Text style={styles.metaLine}>
+            {listing.year} - {listing.mileage || "Mileage not listed"} - {(listing.city ?? "Location not set")}
           </Text>
-          <Text style={styles.factLabel}>RIDEABLE</Text>
-        </View>
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>DESCRIPTION</Text>
-        <Text style={styles.description}>{listing.description}</Text>
-      </View>
-
-      <View style={styles.divider} />
-
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>SPECIFICATIONS</Text>
-        <SpecGrid specs={listing.specs} />
-      </View>
-
-      <View style={styles.divider} />
-
-      {/* Seller */}
-      <View style={styles.section}>
-        <Text style={styles.sectionTitle}>SELLER</Text>
-        <Pressable
-          style={styles.sellerCard}
-          onPress={() => router.push(`/builder/${listing.seller.id}`)}
-        >
-          <View style={styles.sellerAvatar}>
-            <Text style={styles.sellerAvatarText}>
-              {listing.seller.name[0]}
-            </Text>
+          <View style={styles.pillRow}>
+            <View style={styles.infoPill}>
+              <Text style={styles.infoPillText}>{rideable ? "Rideable" : "Project"}</Text>
+            </View>
+            {listing.isRare ? (
+              <View style={styles.infoPill}>
+                <Text style={styles.infoPillText}>Rare find</Text>
+              </View>
+            ) : null}
           </View>
-          <View style={styles.sellerInfo}>
-            <Text style={styles.sellerName}>{listing.seller.name}</Text>
-            <View style={styles.sellerMeta}>
-              {listing.seller.verified && (
-                <View style={styles.verifiedBadge}>
-                  <Text style={styles.verifiedText}>VERIFIED</Text>
-                </View>
-              )}
-              <Text style={styles.sellerType}>
-                {listing.seller.type.toUpperCase()}
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.section}>
+          <Text style={styles.description}>
+            <Text style={styles.descriptionSeller}>{sellerName}</Text>
+            {" "}
+            {listing.description || "No description yet."}
+          </Text>
+        </View>
+
+        <View style={styles.divider} />
+
+        <View style={styles.section}>
+          <Pressable
+            style={styles.sellerCard}
+            onPress={() => router.push(`/builder/${sellerId}`)}
+          >
+            <View style={styles.sellerAvatar}>
+              <Text style={styles.sellerAvatarText}>
+                {sellerName[0]}
               </Text>
             </View>
-            <Text style={styles.sellerMemberSince}>
-              Member since {listing.seller.memberSince}
-            </Text>
+            <View style={styles.sellerInfo}>
+              <Text style={styles.sellerName}>Sold by {sellerName}</Text>
+              <Text style={styles.sellerMemberSince}>
+                {(listing.city ?? "Location not set")} - Member since {listing.sellerMemberSince ?? "-"}
+              </Text>
+            </View>
+            <Text style={styles.sellerArrow}>→</Text>
+          </Pressable>
+          <View style={styles.sellerActions}>
+            <Pressable style={styles.visitButton} onPress={() => router.push(`/builder/${sellerId}`)}>
+              <Text style={styles.visitButtonText}>Visit shop</Text>
+            </Pressable>
+            <Pressable style={styles.visitButton} onPress={handleMessageSeller}>
+              <Text style={styles.visitButtonText}>Ask a question</Text>
+            </Pressable>
           </View>
-          <Text style={styles.sellerArrow}>→</Text>
-        </Pressable>
-      </View>
+        </View>
+      </ScrollView>
 
-      {/* Contact button */}
-      <View style={styles.actions}>
-        <Pressable style={styles.contactButton} onPress={handleMessageSeller}>
-          <Text style={styles.contactButtonText}>MESSAGE SELLER</Text>
+      <View style={styles.bottomBar}>
+        <Text style={styles.bottomPrice}>{formatUsd(listing.price)}</Text>
+        <Pressable style={styles.offerButton} onPress={handleMessageSeller}>
+          <Text style={styles.offerButtonText}>Make offer</Text>
+        </Pressable>
+        <Pressable style={styles.buyButton} onPress={handleMessageSeller}>
+          <Text style={styles.buyButtonText}>Buy</Text>
         </Pressable>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
 // ── Styles ────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: S.screenContainer,
+  scrollContent: {
+    paddingBottom: 126,
+  },
 
   // Carousel
   carouselSlide: {
     width: width,
-    height: width * 1.15,
+    height: width * 1.08,
     backgroundColor: COLORS.surface,
   },
   carouselImage: S.cardImage,
@@ -277,13 +256,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dot: {
-    width: 6,
-    height: 6,
-    backgroundColor: COLORS.whiteA35,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.whiteA50,
   },
   dotActive: {
     backgroundColor: COLORS.white,
-    width: 20,
   },
   counter: {
     position: "absolute",
@@ -303,51 +282,40 @@ const styles = StyleSheet.create({
   // Title
   titleBlock: {
     paddingHorizontal: SPACING.page,
-    paddingTop: SPACING.lg,
-    paddingBottom: SPACING.md,
-  },
-  year: {
-    fontSize: 11,
-    fontFamily: F.mono,
-    letterSpacing: 2,
-    color: COLORS.textMuted,
+    paddingTop: 22,
+    paddingBottom: 18,
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
-    letterSpacing: -0.5,
-    marginTop: 2,
+    letterSpacing: 0,
+    textTransform: "uppercase",
   },
-  price: {
-    ...TYPE.price,
-    marginTop: SPACING.sm,
+  metaLine: {
+    fontSize: 16,
+    fontFamily: F.bold,
+    color: COLORS.textMuted,
+    marginTop: 4,
   },
-
-  // Facts
-  factsRow: {
+  pillRow: {
     flexDirection: "row",
-    paddingHorizontal: SPACING.page,
-    paddingVertical: SPACING.lg,
-  },
-  fact: {
-    flex: 1,
     alignItems: "center",
+    gap: 12,
+    marginTop: 20,
   },
-  factValue: {
+  infoPill: {
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    paddingVertical: 7,
+    backgroundColor: COLORS.surfaceRaised,
+  },
+  infoPillText: {
     fontSize: 14,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
-    letterSpacing: 0.5,
-  },
-  factLabel: {
-    ...TYPE.label,
-    letterSpacing: 2,
-    marginTop: 4,
-  },
-  factDivider: {
-    width: 0.5,
-    backgroundColor: COLORS.divider,
   },
 
   // Sections
@@ -356,30 +324,12 @@ const styles = StyleSheet.create({
   sectionTitle: S.sectionTitle,
   description: {
     ...TYPE.body,
-    lineHeight: 24,
+    fontSize: 18,
+    lineHeight: 27,
     color: COLORS.textSecondary,
   },
-
-  // Spec grid
-  specGrid: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-  },
-  specCell: {
-    width: "50%",
-    paddingVertical: 14,
-    paddingRight: SPACING.md,
-    borderBottomWidth: 0.5,
-    borderBottomColor: COLORS.divider,
-  },
-  specLabel: {
-    ...TYPE.label,
-    letterSpacing: 1.5,
-    marginBottom: 4,
-  },
-  specValue: {
-    fontSize: 14,
-    fontFamily: F.semibold,
+  descriptionSeller: {
+    fontFamily: F.bold,
     color: COLORS.textPrimary,
   },
 
@@ -390,19 +340,19 @@ const styles = StyleSheet.create({
   },
   sellerAvatar: {
     ...S.avatarBase,
-    width: 44,
-    height: 44,
-    marginRight: SPACING.md,
+    width: 64,
+    height: 64,
+    marginRight: 18,
   },
   sellerAvatarText: {
     ...S.avatarText,
-    fontSize: 18,
+    fontSize: 24,
   },
   sellerInfo: {
     flex: 1,
   },
   sellerName: {
-    fontSize: 15,
+    fontSize: 18,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
   },
@@ -419,15 +369,70 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   sellerMemberSince: {
-    fontSize: 11,
-    fontFamily: F.regular,
+    fontSize: 16,
+    fontFamily: F.semibold,
     color: COLORS.textMuted,
-    marginTop: 2,
+    marginTop: 4,
   },
   sellerArrow: S.menuArrow,
-
-  // Actions
-  actions: S.actionsFooter,
-  contactButton: S.primaryButton,
-  contactButtonText: S.primaryButtonText,
+  sellerActions: {
+    flexDirection: "row",
+    gap: SPACING.md,
+    marginTop: SPACING.lg,
+  },
+  visitButton: {
+    ...S.secondaryButton,
+    flex: 1,
+    minHeight: 52,
+    borderRadius: 6,
+    paddingVertical: 0,
+  },
+  visitButtonText: {
+    ...S.secondaryButtonText,
+    fontSize: 17,
+  },
+  bottomBar: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    minHeight: 96,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
+    backgroundColor: COLORS.white,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: SPACING.page,
+    paddingTop: 12,
+    paddingBottom: 24,
+  },
+  bottomPrice: {
+    flex: 1,
+    fontSize: 25,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+  },
+  offerButton: {
+    ...S.secondaryButton,
+    minHeight: 54,
+    borderRadius: 4,
+    paddingHorizontal: 18,
+    paddingVertical: 0,
+  },
+  offerButtonText: {
+    ...S.secondaryButtonText,
+    fontSize: 17,
+  },
+  buyButton: {
+    ...S.primaryButton,
+    minHeight: 54,
+    borderRadius: 4,
+    paddingHorizontal: 28,
+    paddingVertical: 0,
+  },
+  buyButtonText: {
+    ...S.primaryButtonText,
+    fontSize: 17,
+  },
 });

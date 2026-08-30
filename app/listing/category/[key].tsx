@@ -4,13 +4,12 @@
  */
 import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
-import {
-  JUST_LISTED,
-  PROJECT_BIKES,
-  UNDER_5K,
-} from "@/data/registry";
+import { fetchRegistryData, type RegistryListing } from "@/lib/registry-db";
+import { formatUsd } from "@/lib/formatters";
+import { backOrReplace } from "@/lib/navigation";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import {
   Dimensions,
@@ -29,24 +28,24 @@ const CARD_W = (SCREEN_W - SPACING.page * 2 - GAP) / 2;
 type CategoryConfig = {
   title: string;
   sub: string;
-  data: typeof JUST_LISTED;
+  dataKey: "justListed" | "under5k" | "projectBikes";
 };
 
 const CATEGORIES: Record<string, CategoryConfig> = {
   "just-listed": {
     title: "Just listed",
     sub: "Ink's still wet. First looks for members only.",
-    data: JUST_LISTED,
+    dataKey: "justListed",
   },
   "under-5k": {
     title: "Under $5K",
     sub: "Serious machines. Reasonable money. No compromises.",
-    data: UNDER_5K,
+    dataKey: "under5k",
   },
   "project-bikes": {
     title: "Project bikes",
     sub: "Rough around the edges. Priced for the ambitious.",
-    data: PROJECT_BIKES,
+    dataKey: "projectBikes",
   },
 };
 
@@ -55,26 +54,34 @@ export default function CategoryScreen() {
   const router = useRouter();
 
   const config = CATEGORIES[key ?? ""];
-  const data = config?.data;
+  const { data: items = [] } = useQuery({
+    queryKey: ["listing-category", config?.dataKey],
+    queryFn: async () => {
+      const data = await fetchRegistryData();
+      return config ? data[config.dataKey] : [];
+    },
+    enabled: Boolean(config),
+    initialData: [] as RegistryListing[],
+  });
 
   const { left, right } = useMemo(() => {
-    const l: typeof JUST_LISTED = [];
-    const r: typeof JUST_LISTED = [];
-    (data ?? []).forEach((item, i) => (i % 2 === 0 ? l : r).push(item));
+    const l: RegistryListing[] = [];
+    const r: RegistryListing[] = [];
+    items.forEach((item, i) => (i % 2 === 0 ? l : r).push(item));
     return { left: l, right: r };
-  }, [data]);
+  }, [items]);
 
   if (!config) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()} hitSlop={12}>
+          <Pressable onPress={() => backOrReplace(router, "/(tabs)")} hitSlop={12}>
             <Text style={styles.back}>← BACK</Text>
           </Pressable>
         </View>
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>NOT FOUND</Text>
-          <Text style={styles.emptyBody}>Unknown category "{key}".</Text>
+          <Text style={styles.emptyBody}>Unknown category {key}.</Text>
         </View>
       </SafeAreaView>
     );
@@ -83,7 +90,7 @@ export default function CategoryScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()} hitSlop={12}>
+        <Pressable onPress={() => backOrReplace(router, "/(tabs)")} hitSlop={12}>
           <Text style={styles.back}>← BACK</Text>
         </Pressable>
       </View>
@@ -97,7 +104,7 @@ export default function CategoryScreen() {
         <View style={styles.titleBlock}>
           <Text style={styles.title}>{config.title}</Text>
           <Text style={styles.sub}>{config.sub}</Text>
-          <Text style={styles.count}>{config.data.length} LISTINGS</Text>
+          <Text style={styles.count}>{items.length} LISTINGS</Text>
         </View>
 
         <View style={styles.grid}>
@@ -129,7 +136,7 @@ function Card({
   item,
   onPress,
 }: {
-  item: (typeof JUST_LISTED)[0];
+  item: RegistryListing;
   onPress: () => void;
 }) {
   return (
@@ -154,7 +161,7 @@ function Card({
         {item.year} · {item.make}
       </Text>
       <Text style={styles.model}>{item.model}</Text>
-      <Text style={styles.price}>${item.price.toLocaleString()}</Text>
+      <Text style={styles.price}>{formatUsd(item.price)}</Text>
     </Pressable>
   );
 }
@@ -186,7 +193,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
-    letterSpacing: -0.6,
+    letterSpacing: 0,
   },
   sub: {
     fontSize: 12,
@@ -248,7 +255,7 @@ const styles = StyleSheet.create({
     fontFamily: F.bold,
     color: COLORS.textPrimary,
     marginTop: 1,
-    letterSpacing: -0.3,
+    letterSpacing: 0,
   },
   price: {
     fontSize: 13,

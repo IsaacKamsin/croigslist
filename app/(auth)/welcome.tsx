@@ -2,159 +2,27 @@ import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useVideoPlayer, VideoView } from "expo-video";
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
-import Animated, {
-  Easing,
-  useAnimatedStyle,
-  useSharedValue,
-  withTiming,
-} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width, height } = Dimensions.get("window");
 
-// ── Hero media — images + video ──────────────────────────────────────
-type HeroImage = {
-  type: "image";
-  source: number; // require() returns number
-  credit: string;
-  location: string;
-  duration: number; // ms before rotating
-};
-
-type HeroVideo = {
-  type: "video";
-  source: number;
-  credit: string;
-  location: string;
-  duration: number;
-};
-
-type HeroItem = HeroImage | HeroVideo;
-
-const HERO_MEDIA: HeroItem[] = [
-  // {
-  //   type: "image",
-  //   source: require("../../assets/images/login/IMG_1817.jpg"),
-  //   credit: "@mikethompson",
-  //   location: "Minneapolis, MN",
-  //   duration: 5000,
-  // },
-  {
-    type: "video",
-    source: require("../../assets/images/login/Reel.mov"),
-    credit: "@croigslist",
-    location: "Twin Cities, MN",
-    duration: 8000, // longer for video playback
-  },
-  // {
-  //   type: "image",
-  //   source: require("../../assets/images/login/IMG_5140.jpg"),
-  //   credit: "@davidchang",
-  //   location: "Portland, ME",
-  //   duration: 5000,
-  // },
-  {
-    type: "image",
-    source: require("../../assets/images/login/IMG_5142.jpg"),
-    credit: "@sarahkwon",
-    location: "Duluth, MN",
-    duration: 5000,
-  },
-];
-
-const FADE_DURATION = 800;
-
-const AnimatedImage = Animated.createAnimatedComponent(Image);
-
-// ── Video Background ─────────────────────────────────────────────────
-function VideoBackground({ source }: { source: number }) {
-  const player = useVideoPlayer(source, (p) => {
-    p.loop = true;
-    p.muted = true;
-    p.play();
-  });
-
-  return (
-    <VideoView
-      player={player}
-      style={styles.bgMedia}
-      nativeControls={false}
-      contentFit="cover"
-    />
-  );
-}
-
-// ── Media Renderer ───────────────────────────────────────────────────
-function HeroMedia({ item }: { item: HeroItem }) {
-  if (item.type === "video") {
-    return <VideoBackground source={item.source} />;
-  }
-  return (
-    <Image
-      source={item.source}
-      style={styles.bgMedia}
-      contentFit="cover"
-      cachePolicy={IMAGE_CACHE}
-    />
-  );
-}
+const HERO_IMAGE = require("../../assets/images/login/IMG_5142-hero.jpg");
 
 // ── Main Screen ──────────────────────────────────────────────────────
 export default function WelcomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [currentIndex, setCurrentIndex] = useState(0);
-  const [nextIndex, setNextIndex] = useState(1);
-  const crossfade = useSharedValue(1);
-  const timerRef = useRef<ReturnType<typeof setTimeout>>();
-
-  const scheduleNext = useCallback(() => {
-    const current = HERO_MEDIA[currentIndex];
-    timerRef.current = setTimeout(() => {
-      // Fade out current
-      crossfade.value = withTiming(0, {
-        duration: FADE_DURATION,
-        easing: Easing.inOut(Easing.ease),
-      });
-
-      // After fade, swap indices
-      setTimeout(() => {
-        setCurrentIndex((prev) => {
-          const next = (prev + 1) % HERO_MEDIA.length;
-          setNextIndex((next + 1) % HERO_MEDIA.length);
-          return next;
-        });
-        crossfade.value = 1;
-      }, FADE_DURATION);
-    }, current.duration);
-  }, [currentIndex, crossfade]);
-
-  useEffect(() => {
-    scheduleNext();
-    return () => {
-      if (timerRef.current) clearTimeout(timerRef.current);
-    };
-  }, [scheduleNext]);
-
-  const currentStyle = useAnimatedStyle(() => ({
-    opacity: crossfade.value,
-  }));
-
-  const current = HERO_MEDIA[currentIndex];
-  const next = HERO_MEDIA[nextIndex];
 
   return (
     <View style={styles.container}>
-      {/* Back layer — next item (revealed as current fades) */}
-      <HeroMedia item={next} />
-
-      {/* Front layer — current item (fades out) */}
-      <Animated.View style={[styles.bgMediaWrap, currentStyle]}>
-        <HeroMedia item={current} />
-      </Animated.View>
+      <Image
+        source={HERO_IMAGE}
+        style={styles.bgMedia}
+        contentFit="cover"
+        cachePolicy={IMAGE_CACHE}
+        priority="high"
+      />
 
       <LinearGradient
         colors={[COLORS.blackA10, COLORS.blackA85]}
@@ -162,38 +30,29 @@ export default function WelcomeScreen() {
         style={styles.gradient}
       />
 
-      {/* Logo */}
-      <View style={[styles.logoContainer, { paddingTop: insets.top + 16 }]}>
-        <Text style={styles.logo}>CROIGSLIST</Text>
-      </View>
-
-      {/* Bottom content */}
-      <View style={[styles.bottom, { paddingBottom: insets.bottom + 20 }]}>
-        {/* Photo/video credit */}
-        <View style={styles.creditRow}>
-          <Text style={styles.creditText}>
-            {current.credit} · {current.location}
+      <View style={[styles.bottom, { paddingBottom: insets.bottom + 16 }]}>
+        <View style={styles.card}>
+          <Text style={styles.title}>Start selling{"\n"}on Croigslist</Text>
+          <Text style={styles.subtitle}>
+            Sell builds, parts, and projects from your garage.
           </Text>
-        </View>
-
-        <Text style={styles.title}>Private Motorcycle{"\n"}Registry</Text>
-        <Text style={styles.subtitle}>
-          A members-only registry for serious machines, real builders, and
-          actual riders. No anonymous sellers. No junk. No algorithms.
-        </Text>
-
-        <View style={styles.buttons}>
+          <Text style={styles.subtitle}>
+            Free to list. Add a few details and publish when ready.
+          </Text>
+          <Text style={styles.terms}>
+            By continuing you agree to the Croigslist terms.
+          </Text>
           <Pressable
             style={styles.primaryButton}
-            onPress={() => router.push("/(auth)/apply")}
+            onPress={() => router.replace("/(auth)/apply")}
           >
-            <Text style={styles.primaryButtonText}>Apply</Text>
+            <Text style={styles.primaryButtonText}>Start selling</Text>
           </Pressable>
           <Pressable
             style={styles.secondaryButton}
-            onPress={() => router.push("/(auth)/login")}
+            onPress={() => router.replace("/(auth)/login")}
           >
-            <Text style={styles.secondaryButtonText}>Sign In</Text>
+            <Text style={styles.secondaryButtonText}>I already have an account</Text>
           </Pressable>
         </View>
       </View>
@@ -205,21 +64,7 @@ export default function WelcomeScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.black },
   bgMedia: { ...StyleSheet.absoluteFillObject, width, height },
-  bgMediaWrap: { ...StyleSheet.absoluteFillObject },
   gradient: { ...StyleSheet.absoluteFillObject },
-  logoContainer: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    paddingHorizontal: SPACING.page,
-  },
-  logo: {
-    fontSize: 15,
-    fontFamily: F.bold,
-    letterSpacing: 4,
-    color: COLORS.white,
-  },
   bottom: {
     position: "absolute",
     bottom: 0,
@@ -227,53 +72,51 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: SPACING.page,
   },
-  creditRow: {
-    marginBottom: SPACING.md,
-    alignSelf: "flex-start",
-    backgroundColor: COLORS.blackA45,
-    borderRadius: 25,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-  },
-  creditText: {
-    fontSize: 10,
-    fontFamily: F.mono,
-    letterSpacing: 0.5,
-    color: COLORS.whiteA70,
+  card: {
+    backgroundColor: COLORS.white,
+    borderRadius: 14,
+    paddingHorizontal: 30,
+    paddingTop: 30,
+    paddingBottom: 24,
   },
   title: {
-    fontSize: 32,
+    fontSize: 38,
     fontFamily: F.bold,
-    color: COLORS.white,
-    letterSpacing: -0.5,
-    lineHeight: 36,
+    color: COLORS.textPrimary,
+    letterSpacing: 0,
+    lineHeight: 41,
   },
   subtitle: {
-    fontSize: 15,
+    fontSize: 17,
     fontFamily: F.regular,
-    color: COLORS.whiteA60,
-    lineHeight: 22,
-    marginTop: SPACING.md,
-    maxWidth: 300,
+    color: COLORS.textSecondary,
+    lineHeight: 24,
+    marginTop: 18,
   },
-  buttons: { flexDirection: "row", gap: SPACING.md, marginTop: SPACING.xl },
+  terms: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: F.regular,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginTop: 24,
+    marginBottom: 14,
+  },
   primaryButton: {
-    flex: 1,
-    backgroundColor: COLORS.white,
-    paddingVertical: 16,
+    backgroundColor: COLORS.black,
+    borderRadius: 32,
+    minHeight: 56,
+    justifyContent: "center",
     alignItems: "center",
   },
-  primaryButtonText: { fontSize: 15, fontFamily: F.bold, color: COLORS.black },
+  primaryButtonText: { fontSize: 16, fontFamily: F.bold, color: COLORS.white },
   secondaryButton: {
-    flex: 1,
-    borderWidth: 1.5,
-    borderColor: COLORS.whiteA40,
-    paddingVertical: 16,
     alignItems: "center",
+    paddingTop: 22,
   },
   secondaryButtonText: {
-    fontSize: 15,
+    fontSize: 16,
     fontFamily: F.bold,
-    color: COLORS.white,
+    color: COLORS.textPrimary,
   },
 });

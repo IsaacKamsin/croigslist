@@ -1,8 +1,5 @@
-// hooks/useBikeVision.ts
-
+import * as FileSystem from "expo-file-system/legacy";
 import { useState } from "react";
-
-const API_KEY = process.env.EXPO_PUBLIC_OPENAI_API_KEY ?? "";
 
 export interface BikeAnalysis {
   baseBike: {
@@ -22,44 +19,93 @@ export interface BikeAnalysis {
   confidence: number;
 }
 
-const VISION_PROMPT = `You are analyzing a motorcycle photo for a members-only motorcycle registry. The community cares about how bikes are built, not just what they are off the lot. Custom builds, cafe racers, trackers, scramblers, and project bikes are the core audience.
+type BikeVisionError = {
+  error?: string;
+  message?: string;
+};
 
-Analyze this motorcycle image and return ONLY valid JSON with no other text, no markdown fences:
-
-{
-  "base_bike": {
-    "brand": "manufacturer name",
-    "model": "model name or best guess",
-    "year_estimate": "year or range like 2020-2024"
-  },
-  "build_style": "cafe racer | scrambler | tracker | bobber | cruiser | adventure | sport | standard | touring | project | stock | custom",
-  "handlebar_type": "clip-on | drag | clubman | tracker | stock | ADV | ape hanger | other",
-  "seat_type": "solo cowl | brat | tuck-and-roll | cafe hump | stock | touring | custom",
-  "exhaust_type": "2-into-1 | megaphone | wrapped | shorty | pod | slip-on | full system | stock",
-  "tank_style": "stock | peanut | manx | benelli | tracker | custom",
-  "notable_mods": ["list of visible modifications or aftermarket parts"],
-  "color_scheme": "primary colors and finish description",
-  "overall_condition": "show | daily | project | rough",
-  "vibe": "one sentence describing the feel and energy of this bike as a rider would describe it to a friend",
-  "confidence": 0.0 to 1.0
+function isBikeAnalysis(value: unknown): value is BikeAnalysis {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<BikeAnalysis>;
+  return Boolean(
+    candidate.baseBike &&
+      typeof candidate.baseBike.brand === "string" &&
+      typeof candidate.baseBike.model === "string" &&
+      typeof candidate.baseBike.yearEstimate === "string",
+  );
 }
 
-If you cannot identify the motorcycle clearly, still provide your best guess and set confidence below 0.5. Focus on build characteristics over factory specs.`;
+function errorMessageFromResult(value: unknown) {
+  if (!value || typeof value !== "object") return null;
+  const candidate = value as BikeVisionError;
+  return candidate.error ?? candidate.message ?? null;
+}
 
-async function imageToBase64(uri: string): Promise<string> {
+function mimeTypeForUri(uri: string) {
+  const cleanUri = uri.split("?")[0]?.toLowerCase() ?? "";
+  if (cleanUri.endsWith(".png")) return "image/png";
+  if (cleanUri.endsWith(".webp")) return "image/webp";
+  if (cleanUri.endsWith(".heic")) return "image/heic";
+  if (cleanUri.endsWith(".heif")) return "image/heif";
+  return "image/jpeg";
+}
+
+function isDataUrl(value: string) {
+  return /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(value);
+}
+
+async function imageToDataUrl(uri: string): Promise<string> {
+  if (isDataUrl(uri)) return uri;
+
+  if (uri.startsWith("file://") || uri.startsWith("ph://")) {
+    const base64 = await FileSystem.readAsStringAsync(uri, {
+      encoding: "base64",
+    });
+    return `data:${mimeTypeForUri(uri)};base64,${base64}`;
+  }
+
   const response = await fetch(uri);
-  const blob = await response.blob();
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      const result = reader.result as string;
-      // Strip the data:image/...;base64, prefix
-      const base64 = result.split(",")[1];
-      resolve(base64);
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(blob);
+  const contentType = response.headers.get("content-type") ?? mimeTypeForUri(uri);
+  if (!response.ok) {
+    throw new Error(`Could not load image for analysis (${response.status}).`);
+  }
+  if (!contentType.startsWith("image/")) {
+    throw new Error(`Analysis URL returned ${contentType}, not an image.`);
+  }
+  const buffer = await response.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return `data:${contentType};base64,${btoa(binary)}`;
+}
+
+async function invokeBikeVision(imageDataUrl: string) {
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !anonKey) {
+    throw new Error("Missing Supabase configuration.");
+  }
+
+  const response = await fetch(`${supabaseUrl}/functions/v1/analyze-bike`, {
+    method: "POST",
+    headers: {
+      apikey: anonKey,
+      Authorization: `Bearer ${anonKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ imageDataUrl }),
   });
+  const result = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      errorMessageFromResult(result) ??
+        `Bike analysis failed with status ${response.status}.`,
+    );
+  }
+
+  return result;
 }
 
 export function useBikeVision() {
@@ -67,114 +113,25 @@ export function useBikeVision() {
   const [error, setError] = useState<string | null>(null);
 
   const analyze = async (imageUri: string): Promise<BikeAnalysis | null> => {
-    console.log("🔵 [BikeVision] Starting analysis...");
-    console.log(
-      "🔵 [BikeVision] API_KEY:",
-      API_KEY ? `${API_KEY.slice(0, 10)}...${API_KEY.slice(-4)}` : "❌ EMPTY",
-    );
-
     setLoading(true);
     setError(null);
 
     try {
-      console.log("🔵 [BikeVision] Reading image as base64...");
-      const base64 = await imageToBase64(imageUri);
-      console.log("🔵 [BikeVision] Base64 length:", base64.length);
+      const imageDataUrl = await imageToDataUrl(imageUri);
+      const data = await invokeBikeVision(imageDataUrl);
 
-      const ext = imageUri.split(".").pop()?.toLowerCase();
-      const mediaType =
-        ext === "png"
-          ? "image/png"
-          : ext === "webp"
-            ? "image/webp"
-            : ext === "gif"
-              ? "image/gif"
-              : "image/jpeg";
-
-      const dataUrl = `data:${mediaType};base64,${base64}`;
-
-      console.log("🔵 [BikeVision] Calling OpenAI API...");
-      const response = await fetch(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${API_KEY}`,
-          },
-          body: JSON.stringify({
-            model: "gpt-4o",
-            max_tokens: 1024,
-            messages: [
-              {
-                role: "user",
-                content: [
-                  {
-                    type: "image_url",
-                    image_url: {
-                      url: dataUrl,
-                      detail: "high",
-                    },
-                  },
-                  {
-                    type: "text",
-                    text: VISION_PROMPT,
-                  },
-                ],
-              },
-            ],
-          }),
-        },
-      );
-
-      console.log("🔵 [BikeVision] Response status:", response.status);
-
-      if (!response.ok) {
-        const errText = await response.text();
-        console.error("🔴 [BikeVision] API error response:", errText);
-        throw new Error(`API error ${response.status}: ${errText}`);
+      if (!data) throw new Error("Bike analysis returned no data.");
+      if (!isBikeAnalysis(data)) {
+        throw new Error(
+          errorMessageFromResult(data) ?? "Bike analysis returned invalid data.",
+        );
       }
 
-      const data = await response.json();
-      console.log(
-        "🔵 [BikeVision] Raw response:",
-        JSON.stringify(data).slice(0, 500),
-      );
-
-      const text = data.choices?.[0]?.message?.content ?? "";
-      console.log("🔵 [BikeVision] Extracted text:", text.slice(0, 300));
-
-      const clean = text.replace(/```json\n?|```\n?/g, "").trim();
-      const parsed = JSON.parse(clean);
-
-      const result: BikeAnalysis = {
-        baseBike: {
-          brand: parsed.base_bike?.brand ?? "Unknown",
-          model: parsed.base_bike?.model ?? "Unknown",
-          yearEstimate: parsed.base_bike?.year_estimate ?? "Unknown",
-        },
-        buildStyle: parsed.build_style ?? "unknown",
-        handlebarType: parsed.handlebar_type ?? "unknown",
-        seatType: parsed.seat_type ?? "unknown",
-        exhaustType: parsed.exhaust_type ?? "unknown",
-        tankStyle: parsed.tank_style ?? "unknown",
-        notableMods: parsed.notable_mods ?? [],
-        colorScheme: parsed.color_scheme ?? "unknown",
-        overallCondition: parsed.overall_condition ?? "unknown",
-        vibe: parsed.vibe ?? "",
-        confidence: parsed.confidence ?? 0,
-      };
-
-      console.log(
-        "✅ [BikeVision] Success:",
-        result.baseBike.brand,
-        result.baseBike.model,
-      );
-      console.log("✅ [BikeVision] Vibe:", result.vibe);
-      return result;
+      return data;
     } catch (err: any) {
-      console.error("🔴 [BikeVision] ERROR:", err.message);
-      setError(err.message ?? "Unknown error");
+      const message = err?.message ?? "Could not analyze this bike.";
+      console.warn("🟠 [BikeVision] Analysis failed:", message);
+      setError(message);
       return null;
     } finally {
       setLoading(false);

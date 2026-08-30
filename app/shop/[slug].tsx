@@ -1,10 +1,15 @@
+import { StatusState } from "@/components/StatusState";
 import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
+import { startConversation } from "@/lib/messages-db";
+import { fetchShopBySlug } from "@/lib/registry-db";
+import { formatUsd } from "@/lib/formatters";
+import { backOrReplace } from "@/lib/navigation";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import { useCallback } from "react";
 import {
-  Dimensions,
   FlatList,
   Linking,
   Pressable,
@@ -14,119 +19,67 @@ import {
   View,
 } from "react-native";
 
-const { width } = Dimensions.get("window");
-
-// ── Types ────────────────────────────────────────────────────────────
-interface BuildStyle {
-  label: string;
-}
-
-interface ShopBuild {
-  id: string;
-  year: number;
-  make: string;
-  model: string;
-  price: number;
-  image: string;
-}
-
-interface ShopData {
-  name: string;
-  tagline: string;
-  verified: boolean;
-  badges: string[];
-  location: string;
-  address: string;
-  phone: string;
-  email: string;
-  website: string;
-  appointmentOnly: boolean;
-  buildStyles: BuildStyle[];
-  builds: ShopBuild[];
-}
-
-// ── Mock data — eventually from API ──────────────────────────────────
-const SHOPS: Record<string, ShopData> = {
-  "reincarnation-cycles": {
-    name: "REINCARNATION\nCYCLES",
-    tagline: "You dream it — we make it.",
-    verified: true,
-    badges: ["Custom Builds", "Vintage Specialist"],
-    location: "Circle Pines, MN 55014",
-    address: "10750 Stutz St NE, Circle Pines, MN 55014",
-    phone: "612-568-8141",
-    email: "reincarnationcycles@gmail.com",
-    website: "reincarnationcycles.com",
-    appointmentOnly: true,
-    buildStyles: [
-      { label: "Cafe Racers" },
-      { label: "Bobbers" },
-      { label: "Scrambler / Brat" },
-    ],
-    builds: [
-      {
-        id: "rc-1",
-        year: 1978,
-        make: "HONDA",
-        model: "CB550 Cafe",
-        price: 12500,
-        image:
-          "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=500&q=80",
-      },
-      {
-        id: "rc-2",
-        year: 1975,
-        make: "YAMAHA",
-        model: "XS650 Bobber",
-        price: 9800,
-        image:
-          "https://images.unsplash.com/photo-1609630875171-b1321377ee65?w=500&q=80",
-      },
-      {
-        id: "rc-3",
-        year: 1982,
-        make: "HONDA",
-        model: "CX500 Scrambler",
-        price: 11200,
-        image:
-          "https://images.unsplash.com/photo-1622185135505-2d795003994a?w=500&q=80",
-      },
-      {
-        id: "rc-4",
-        year: 1973,
-        make: "KAWASAKI",
-        model: "Z1 Cafe",
-        price: 16500,
-        image:
-          "https://images.unsplash.com/photo-1568772585407-9361f9bf3a87?w=500&q=80",
-      },
-    ],
-  },
-};
-
 // ── Main Screen ──────────────────────────────────────────────────────
 
 export default function ShopScreen() {
   const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
-  const shop = SHOPS[slug ?? ""] ?? SHOPS["reincarnation-cycles"];
+  const { data: shop, isPending } = useQuery({
+    queryKey: ["shop", slug],
+    queryFn: () => fetchShopBySlug(slug),
+    enabled: Boolean(slug),
+  });
 
-  const handleMessage = useCallback(() => {
-    router.push(`/messages/${slug}`);
-  }, [slug, router]);
+  const handleMessage = useCallback(async () => {
+    if (!shop) return;
+    const conversationId = await startConversation({
+      participantId: shop.id,
+      participantName: shop.name,
+    });
+    router.push({
+      pathname: "/messages/[id]",
+      params: { id: conversationId, sellerName: shop.name },
+    });
+  }, [shop, router]);
 
   const handleWeb = useCallback(() => {
-    Linking.openURL(`https://${shop.website}`);
-  }, [shop.website]);
+    if (shop?.website) Linking.openURL(`https://${shop.website}`);
+  }, [shop?.website]);
 
   const handleCall = useCallback(() => {
-    Linking.openURL(`tel:${shop.phone.replace(/-/g, "")}`);
-  }, [shop.phone]);
+    if (shop?.phone) Linking.openURL(`tel:${shop.phone.replace(/-/g, "")}`);
+  }, [shop?.phone]);
 
   const goListing = useCallback(
     (id: string) => router.push(`/listing/${id}`),
     [router],
   );
+
+  if (isPending) {
+    return (
+      <View style={styles.container}>
+        <StatusState eyebrow="Loading" title="Opening shop" />
+      </View>
+    );
+  }
+
+  if (!shop) {
+    return (
+      <View style={styles.container}>
+        <StatusState
+          eyebrow="Not found"
+          title="Shop unavailable"
+          body="This shop may have been removed or the link is no longer valid."
+          actionLabel="GO BACK"
+          onAction={() => backOrReplace(router, "/(tabs)")}
+        />
+      </View>
+    );
+  }
+
+  const builds = shop.listings ?? [];
+  const buildStyles = shop.buildStyles ?? [];
+  const badges = shop.badges ?? [];
 
   return (
     <View style={styles.container}>
@@ -149,7 +102,7 @@ export default function ShopScreen() {
                 </Text>
               </View>
             )}
-            {shop.badges.map((b) => (
+            {badges.map((b) => (
               <View key={b} style={[styles.badge, styles.badgeOutline]}>
                 <Text style={[styles.badgeText, styles.badgeTextOutline]}>
                   {b.toUpperCase()}
@@ -168,24 +121,30 @@ export default function ShopScreen() {
           {/* Contact info in hero */}
           <View style={styles.heroDivider} />
           <View style={styles.heroContact}>
-            <Text style={styles.heroContactText}>{shop.address}</Text>
-            <Pressable onPress={handleCall}>
-              <Text style={styles.heroContactLink}>{shop.phone}</Text>
-            </Pressable>
-            <Pressable onPress={handleWeb}>
-              <Text style={styles.heroContactLink}>{shop.website}</Text>
-            </Pressable>
+            {shop.address && (
+              <Text style={styles.heroContactText}>{shop.address}</Text>
+            )}
+            {shop.phone && (
+              <Pressable onPress={handleCall}>
+                <Text style={styles.heroContactLink}>{shop.phone}</Text>
+              </Pressable>
+            )}
+            {shop.website && (
+              <Pressable onPress={handleWeb}>
+                <Text style={styles.heroContactLink}>{shop.website}</Text>
+              </Pressable>
+            )}
           </View>
         </View>
 
         {/* ── BUILD STYLE TAGS ── */}
         <View style={styles.styleRow}>
-          {shop.buildStyles.map((s) => (
-            <View key={s.label} style={styles.styleChip}>
+          {buildStyles.map((style) => (
+            <View key={style} style={styles.styleChip}>
               <View style={styles.styleIcon}>
                 <Text style={styles.styleIconDot}>●</Text>
               </View>
-              <Text style={styles.styleLabel}>{s.label.toUpperCase()}</Text>
+              <Text style={styles.styleLabel}>{style.toUpperCase()}</Text>
             </View>
           ))}
         </View>
@@ -194,38 +153,47 @@ export default function ShopScreen() {
         <View style={styles.buildsSection}>
           <View style={styles.buildsHeader}>
             <Text style={styles.buildsTitle}>BUILDS</Text>
-            <Text style={styles.buildsCount}>{shop.builds.length}</Text>
+            <Text style={styles.buildsCount}>{builds.length}</Text>
           </View>
-          <FlatList
-            horizontal
-            data={shop.builds}
-            keyExtractor={(i) => i.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.buildsScroll}
-            renderItem={({ item }) => (
-              <Pressable
-                style={styles.buildCard}
-                onPress={() => goListing(item.id)}
-              >
-                <View style={styles.buildImgWrap}>
-                  <Image
-                    source={{ uri: item.image }}
-                    style={styles.buildImg}
-                    contentFit="cover"
-                    cachePolicy={IMAGE_CACHE}
-                    recyclingKey={item.image}
-                  />
-                </View>
-                <Text style={styles.buildMeta}>
-                  {item.year} · {item.make}
-                </Text>
-                <Text style={styles.buildModel}>{item.model}</Text>
-                <Text style={styles.buildPrice}>
-                  ${item.price.toLocaleString()}
-                </Text>
-              </Pressable>
-            )}
-          />
+          {builds.length === 0 ? (
+            <View style={styles.emptyBuilds}>
+              <Text style={styles.emptyBuildsTitle}>No listings yet</Text>
+              <Text style={styles.emptyBuildsBody}>
+                Message the shop or check back when inventory is live.
+              </Text>
+            </View>
+          ) : (
+            <FlatList
+              horizontal
+              data={builds}
+              keyExtractor={(i) => i.id}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.buildsScroll}
+              renderItem={({ item }) => (
+                <Pressable
+                  style={styles.buildCard}
+                  onPress={() => goListing(item.id)}
+                >
+                  <View style={styles.buildImgWrap}>
+                    <Image
+                      source={{ uri: item.image }}
+                      style={styles.buildImg}
+                      contentFit="cover"
+                      cachePolicy={IMAGE_CACHE}
+                      recyclingKey={item.image}
+                    />
+                  </View>
+                  <Text style={styles.buildMeta}>
+                    {item.year} · {item.make}
+                  </Text>
+                  <Text style={styles.buildModel}>{item.model}</Text>
+                  <Text style={styles.buildPrice}>
+                    {formatUsd(item.price)}
+                  </Text>
+                </Pressable>
+              )}
+            />
+          )}
         </View>
       </ScrollView>
 
@@ -270,7 +238,7 @@ const styles = StyleSheet.create({
   heroName: {
     fontSize: 36,
     fontFamily: F.bold,
-    letterSpacing: -1.5,
+    letterSpacing: 0,
     lineHeight: 38,
     color: COLORS.white,
     marginBottom: 4,
@@ -409,6 +377,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.page,
     gap: 14,
   },
+  emptyBuilds: {
+    marginHorizontal: SPACING.page,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    backgroundColor: COLORS.surface,
+    padding: SPACING.lg,
+  },
+  emptyBuildsTitle: {
+    fontSize: 22,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+  },
+  emptyBuildsBody: {
+    fontSize: 13,
+    fontFamily: F.regular,
+    lineHeight: 18,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.sm,
+  },
   buildCard: {
     width: CARD_W,
   },
@@ -430,7 +417,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
-    letterSpacing: -0.3,
+    letterSpacing: 0,
     marginTop: 2,
   },
   buildPrice: {

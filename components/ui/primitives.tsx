@@ -85,7 +85,7 @@ export function PageTitle({
     <Text
       style={[
         TYPE.pageTitle,
-        { fontSize: 42, letterSpacing: -1, lineHeight: 44 },
+        { fontSize: 42, letterSpacing: 0, lineHeight: 44 },
         style,
       ]}
     >

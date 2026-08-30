@@ -1,14 +1,11 @@
 import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING, TYPE } from "@/constants/design";
 import { hapticLight } from "@/hooks/useHaptics";
 import { S } from "@/constants/styles";
-import {
-  JUST_LISTED,
-  PROJECT_BIKES,
-  RARE_FINDS,
-  UNDER_5K,
-} from "@/data/registry";
+import { fetchListings, type RegistryListing } from "@/lib/registry-db";
+import { formatUsd } from "@/lib/formatters";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
+import { useQuery } from "@tanstack/react-query";
 import { useMemo, useState } from "react";
 import {
   Dimensions,
@@ -85,31 +82,32 @@ type TaggedListing = {
   price: number;
   image: string;
   viewers: number;
+  city?: string;
   tags: string[];
 };
 
-function tagListings(): TaggedListing[] {
-  const seen = new Set<string>();
-  const result: TaggedListing[] = [];
-  const add = (items: typeof JUST_LISTED, tag: string) => {
-    for (const item of items) {
-      if (seen.has(item.id)) {
-        const existing = result.find((r) => r.id === item.id);
-        if (existing && !existing.tags.includes(tag)) existing.tags.push(tag);
-        continue;
-      }
-      seen.add(item.id);
-      result.push({ ...item, tags: [tag] });
-    }
-  };
-  add(JUST_LISTED, "RIDEABLE");
-  add(UNDER_5K, "RIDEABLE");
-  add(RARE_FINDS, "RARE");
-  add(PROJECT_BIKES, "PROJECT");
-  return result;
-}
+function tagListings(items: RegistryListing[]): TaggedListing[] {
+  return items
+    .filter((item) => item.status !== "sold")
+    .map((item) => {
+      const tags: string[] = [];
+      if (item.isRare) tags.push("RARE");
+      if (item.isProject || item.condition === "project") tags.push("PROJECT");
+      if (!tags.includes("PROJECT")) tags.push("RIDEABLE");
 
-const LISTINGS = tagListings();
+      return {
+        id: item.id,
+        make: item.make,
+        model: item.model,
+        year: item.year,
+        price: item.price,
+        image: item.image,
+        viewers: item.viewers,
+        city: item.city,
+        tags,
+      };
+    });
+}
 
 function sortListings(items: TaggedListing[], sort: SortOption) {
   const sorted = [...items];
@@ -155,9 +153,7 @@ function MasonryCard({
         {item.year} · {item.make}
       </Text>
       <Text style={styles.masonryModel}>{item.model}</Text>
-      <Text style={styles.masonryPrice}>
-        ${item.price.toLocaleString()}
-      </Text>
+      <Text style={styles.masonryPrice}>{formatUsd(item.price)}</Text>
       {item.tags.length > 0 && (
         <View style={styles.tagRow}>
           {item.tags.map((tag) => {
@@ -183,6 +179,11 @@ export default function SearchScreen() {
   const [refine, setRefine] = useState<RefineFilter>("ALL");
   const [sort, setSort] = useState<SortOption>("NEWEST");
   const router = useRouter();
+  const { data: listings = [] } = useQuery({
+    queryKey: ["search-listings"],
+    queryFn: async () => tagListings(await fetchListings()),
+    initialData: [] as TaggedListing[],
+  });
 
   const hasQuery = query.trim().length > 0;
 
@@ -190,7 +191,7 @@ export default function SearchScreen() {
     if (!hasQuery) return [];
 
     const q = query.trim().toLowerCase();
-    let filtered = LISTINGS.filter(
+    let filtered = listings.filter(
       (r) =>
         r.make.toLowerCase().includes(q) ||
         r.model.toLowerCase().includes(q) ||
@@ -200,7 +201,7 @@ export default function SearchScreen() {
     // City filter
     if (city !== "ALL") {
       filtered = filtered.filter(
-        (r) => getCity(r.id).toUpperCase() === city,
+        (r) => (r.city ?? getCity(r.id)).toUpperCase() === city,
       );
     }
 
@@ -214,7 +215,7 @@ export default function SearchScreen() {
     }
 
     return sortListings(filtered, sort);
-  }, [query, hasQuery, city, refine, sort]);
+  }, [query, hasQuery, city, refine, sort, listings]);
 
   // Pre-split columns for masonry
   const { left, right } = useMemo(() => {
@@ -290,6 +291,7 @@ export default function SearchScreen() {
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
+          style={styles.cityScroller}
           contentContainerStyle={styles.cityRow}
         >
           {CITIES.map((c) => {
@@ -373,7 +375,7 @@ export default function SearchScreen() {
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>NOTHING HERE</Text>
           <Text style={styles.emptyBody}>
-            No matches for "{query}". Try a different year, make, or model.
+            No matches for {query}. Try a different year, make, or model.
           </Text>
         </View>
       )}
@@ -440,16 +442,23 @@ const styles = StyleSheet.create({
   },
 
   // City chips
+  cityScroller: {
+    maxHeight: 42,
+    flexGrow: 0,
+  },
   cityRow: {
     paddingHorizontal: SPACING.page,
     gap: SPACING.sm,
     paddingBottom: SPACING.sm,
+    alignItems: "center",
   },
   cityChip: {
     borderWidth: 1,
     borderColor: COLORS.divider,
     paddingHorizontal: 12,
     paddingVertical: 6,
+    height: 30,
+    justifyContent: "center",
   },
   cityChipActive: {
     borderColor: COLORS.black,
@@ -541,7 +550,7 @@ const styles = StyleSheet.create({
     fontFamily: F.bold,
     color: COLORS.textPrimary,
     marginTop: 1,
-    letterSpacing: -0.3,
+    letterSpacing: 0,
   },
   masonryPrice: {
     fontSize: 13,

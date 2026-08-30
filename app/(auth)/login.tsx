@@ -1,10 +1,11 @@
 import { COLORS, F, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
 import { useAuth } from "@/context/AuthContext";
+import { backOrReplace } from "@/lib/navigation";
+import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "expo-router";
-import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
 import {
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,24 +15,35 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { z } from "zod";
+
+const loginSchema = z.object({
+  email: z.string().trim().email("Enter a valid email address."),
+  password: z.string().min(1, "Password is required."),
+});
+
+type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginScreen() {
   const router = useRouter();
   const { signIn } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
+  const {
+    control,
+    handleSubmit,
+    setError,
+    formState: { errors, isSubmitting },
+  } = useForm<LoginForm>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: { email: "", password: "" },
+  });
 
-  const handleLogin = async () => {
-    setError("");
-    setLoading(true);
+  const handleLogin = async (values: LoginForm) => {
     try {
-      await signIn(email, password);
+      await signIn(values.email, values.password);
     } catch (e: any) {
-      setError(e?.message ?? "Login failed. Check your credentials and try again.");
-    } finally {
-      setLoading(false);
+      setError("root", {
+        message: e?.message ?? "Login failed. Check your credentials and try again.",
+      });
     }
   };
 
@@ -43,11 +55,11 @@ export default function LoginScreen() {
       >
         {/* Back */}
         <Pressable
-          onPress={() => router.back()}
+          onPress={() => backOrReplace(router, "/(auth)/welcome")}
           style={styles.backBtn}
           hitSlop={12}
         >
-          <Text style={styles.backText}>← BACK</Text>
+          <Text style={styles.backText}>X</Text>
         </Pressable>
 
         {/* Form */}
@@ -57,46 +69,60 @@ export default function LoginScreen() {
 
           <View style={styles.field}>
             <Text style={styles.label}>EMAIL</Text>
-            <TextInput
-              style={styles.input}
-              value={email}
-              onChangeText={setEmail}
-              placeholder="you@email.com"
-              placeholderTextColor={COLORS.textFaint}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
+            <Controller
+              control={control}
+              name="email"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  value={value}
+                  onChangeText={onChange}
+                  onBlur={onBlur}
+                  placeholder="you@email.com"
+                  placeholderTextColor={COLORS.textFaint}
+                  keyboardType="email-address"
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+              )}
             />
           </View>
 
           <View style={styles.field}>
             <Text style={styles.label}>PASSWORD</Text>
-            <TextInput
-              style={styles.input}
-              value={password}
-              onChangeText={setPassword}
-              placeholder="••••••••"
-              placeholderTextColor={COLORS.textFaint}
-              secureTextEntry
+            <Controller
+              control={control}
+              name="password"
+              render={({ field: { onChange, onBlur, value } }) => (
+                <TextInput
+                  style={styles.input}
+                  value={value}
+                  onChangeText={onChange}
+                  onBlur={onBlur}
+                  placeholder="••••••••"
+                  placeholderTextColor={COLORS.textFaint}
+                  secureTextEntry
+                />
+              )}
             />
           </View>
 
-          {error !== "" && (
-            <Text style={styles.error}>{error}</Text>
-          )}
+          {errors.email?.message && <Text style={styles.error}>{errors.email.message}</Text>}
+          {errors.password?.message && <Text style={styles.error}>{errors.password.message}</Text>}
+          {errors.root?.message && <Text style={styles.error}>{errors.root.message}</Text>}
 
           <Pressable
-            style={[styles.button, loading && styles.buttonDisabled]}
-            onPress={handleLogin}
-            disabled={loading}
+            style={[styles.button, isSubmitting && styles.buttonDisabled]}
+            onPress={handleSubmit(handleLogin)}
+            disabled={isSubmitting}
           >
-            <Text style={styles.buttonText}>
-              {loading ? "VERIFYING..." : "ENTER"}
-            </Text>
+          <Text style={styles.buttonText}>
+              {isSubmitting ? "Checking..." : "Continue"}
+          </Text>
           </Pressable>
 
           <Pressable style={styles.forgotBtn}>
-            <Text style={styles.forgotText}>FORGOT PASSWORD?</Text>
+            <Text style={styles.forgotText}>Forgot password?</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -108,7 +134,6 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: COLORS.bg,
-    paddingHorizontal: SPACING.page,
   },
   inner: {
     flex: 1,
@@ -117,34 +142,33 @@ const styles = StyleSheet.create({
   // Back
   backBtn: {
     paddingTop: SPACING.md,
+    marginHorizontal: SPACING.page,
     alignSelf: "flex-start",
   },
   backText: {
-    fontSize: 11,
-    fontFamily: F.monoMedium,
-    letterSpacing: 2,
-    color: COLORS.textMuted,
+    fontSize: 36,
+    lineHeight: 38,
+    fontFamily: F.light,
+    color: COLORS.textPrimary,
   },
 
   // Form
   form: {
     flex: 1,
-    justifyContent: "center",
+    justifyContent: "flex-start",
+    paddingHorizontal: SPACING.page,
+    paddingTop: 82,
     paddingBottom: 60,
   },
   title: {
-    fontSize: 32,
+    fontSize: 48,
     fontFamily: F.bold,
-    letterSpacing: -0.5,
-    lineHeight: 36,
+    letterSpacing: 0,
+    lineHeight: 52,
     color: COLORS.textPrimary,
   },
   divider: {
-    width: 32,
-    height: 2,
-    backgroundColor: COLORS.black,
-    marginTop: SPACING.md,
-    marginBottom: SPACING.xl,
+    display: "none",
   },
 
   // Fields
@@ -152,15 +176,14 @@ const styles = StyleSheet.create({
     marginBottom: SPACING.lg,
   },
   label: {
-    fontSize: 9,
-    fontFamily: F.monoBold,
-    letterSpacing: 2,
+    fontSize: 13,
+    fontFamily: F.semibold,
+    letterSpacing: 0,
     color: COLORS.textMuted,
-    marginBottom: SPACING.sm,
+    marginBottom: 8,
   },
   input: {
     ...S.input,
-    borderBottomColor: COLORS.divider,
   },
 
   error: {
@@ -184,9 +207,9 @@ const styles = StyleSheet.create({
     marginTop: SPACING.lg,
   },
   forgotText: {
-    fontSize: 10,
-    fontFamily: F.monoMedium,
-    letterSpacing: 1.5,
-    color: COLORS.textFaint,
+    fontSize: 17,
+    fontFamily: F.bold,
+    letterSpacing: 0,
+    color: COLORS.textPrimary,
   },
 });

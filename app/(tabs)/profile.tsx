@@ -6,7 +6,12 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'expo-router';
 import { COLORS, F, SPACING, TYPE } from '@/constants/design';
 import { S } from '@/constants/styles';
-import { QrCodeIcon, StarIcon, ShareNetworkIcon } from 'phosphor-react-native';
+import { ShareNetworkIcon } from 'phosphor-react-native';
+import { fetchGarageBikes } from '@/lib/garage-db';
+import { fetchMyListings } from '@/lib/registry-db';
+import { fetchMessageThreads } from '@/lib/messages-db';
+import { useQuery } from '@tanstack/react-query';
+import { shareBuyerInvite, shareSellerInvite } from '@/lib/share';
 
 function StatBlock({ label, value }: { label: string; value: string }) {
   return (
@@ -17,126 +22,184 @@ function StatBlock({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MenuRow({ label, onPress }: { label: string; onPress?: () => void }) {
+function MenuRow({
+  label,
+  subtitle,
+  onPress,
+}: {
+  label: string;
+  subtitle?: string;
+  onPress?: () => void;
+}) {
   return (
     <Pressable style={styles.menuRow} onPress={onPress}>
-      <Text style={styles.menuLabel}>{label}</Text>
+      <View style={styles.menuText}>
+        <Text style={styles.menuLabel}>{label}</Text>
+        {subtitle ? <Text style={styles.menuSubtitle}>{subtitle}</Text> : null}
+      </View>
       <Text style={styles.menuArrow}>→</Text>
     </Pressable>
   );
 }
 
-// ── Garage Rating ───────────────────────────────────────────────────
-function GarageRating({ rating }: { rating: number }) {
-  return (
-    <View style={styles.ratingWrap}>
-      <View style={styles.ratingStars}>
-        {[1, 2, 3, 4, 5].map((i) => (
-          <StarIcon
-            key={i}
-            size={14}
-            weight={i <= Math.round(rating) ? "fill" : "regular"}
-            color={i <= Math.round(rating) ? COLORS.accent : COLORS.textFaint}
-          />
-        ))}
-      </View>
-      <Text style={styles.ratingValue}>{rating.toFixed(1)}</Text>
-      <Text style={styles.ratingLabel}>GARAGE RATING</Text>
-    </View>
-  );
-}
-
-// ── QR Code Placeholder ─────────────────────────────────────────────
-function QRCodeCard({ name }: { name: string }) {
+function ShareInviteRow({ onPress }: { onPress: () => void }) {
   return (
     <Pressable
-      style={styles.qrCard}
-      onPress={() => {
-        hapticLight();
-        // TODO: open full-screen QR modal
-      }}
+      style={styles.compactQrRow}
+      onPress={onPress}
     >
-      <View style={styles.qrPlaceholder}>
-        <QrCodeIcon size={48} color={COLORS.whiteA50} weight="regular" />
-      </View>
-      <View style={styles.qrInfo}>
-        <Text style={styles.qrTitle}>YOUR MEMBER QR</Text>
-        <Text style={styles.qrSub}>
-          Let other members scan to find your profile and garage.
-        </Text>
-      </View>
-      <ShareNetworkIcon size={18} color={COLORS.textFaint} weight="bold" />
+      <ShareNetworkIcon size={16} color={COLORS.textFaint} weight="bold" />
+      <Text style={styles.compactQrText}>SHARE INVITE</Text>
     </Pressable>
   );
 }
 
 export default function ProfileScreen() {
-  const { member, signOut } = useAuth();
+  const { activeView, member, signOut, setActiveView } = useAuth();
   const router = useRouter();
+  const isBuilder = activeView === 'builder';
+  const { data: stats } = useQuery({
+    queryKey: ['profile-stats', member?.id],
+    queryFn: async () => {
+      const [garageBikes, listings, threads] = await Promise.all([
+        fetchGarageBikes().catch(() => []),
+        fetchMyListings().catch(() => []),
+        fetchMessageThreads().catch(() => []),
+      ]);
+      return {
+        garageCount: garageBikes.length,
+        listingCount: listings.length,
+        soldCount: listings.filter((listing) => listing.status === 'sold').length,
+        messageCount: threads.length,
+      };
+    },
+    initialData: {
+      garageCount: 0,
+      listingCount: 0,
+      soldCount: 0,
+      messageCount: 0,
+    },
+  });
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
         <ScreenHeader title="PROFILE" />
 
-        {/* Identity */}
-        <View style={styles.identity}>
-          <View style={styles.avatarLarge}>
-            <Text style={styles.avatarLargeText}>{member?.name?.[0] ?? 'M'}</Text>
-          </View>
-          <Text style={styles.name}>{member?.name ?? 'Member'}</Text>
-          <View style={styles.verifiedRow}>
+        <View style={styles.summary}>
+          <View style={styles.summaryTop}>
+            <View style={styles.avatarLarge}>
+              <Text style={styles.avatarLargeText}>{member?.name?.[0] ?? 'M'}</Text>
+            </View>
+            <View style={styles.summaryText}>
+              <Text style={styles.name}>{member?.name ?? 'Member'}</Text>
+              <Text style={styles.memberSince}>
+                {isBuilder ? 'SELL' : 'BUY'} MODE · {member?.memberSince ?? '2026'}
+              </Text>
+              {member?.city ? (
+                <Text style={styles.city}>{member.city.toUpperCase()}</Text>
+              ) : null}
+            </View>
             {member?.isVerified && (
               <View style={styles.verifiedBadge}>
                 <Text style={styles.verifiedText}>VERIFIED</Text>
               </View>
             )}
-            <Text style={styles.memberType}>
-              {member?.type?.toUpperCase() ?? 'RIDER'}
-            </Text>
           </View>
-          <Text style={styles.memberSince}>
-            MEMBER SINCE {member?.memberSince ?? '2026'} · {member?.city?.toUpperCase() ?? 'MINNEAPOLIS'}
-          </Text>
-        </View>
 
-        {/* Garage Rating */}
-        <GarageRating rating={4.7} />
-
-        {/* Membership card */}
-        <View style={styles.memberCard}>
-          <View style={styles.memberCardHeader}>
-            <Text style={styles.memberCardLogo}>CROIGSLIST</Text>
-            <Text style={styles.memberCardBadge}>MEMBER</Text>
+          <View style={styles.quickActions}>
+            <ShareInviteRow
+              onPress={() => {
+                hapticLight();
+                if (isBuilder) {
+                  shareBuyerInvite();
+                } else {
+                  shareSellerInvite();
+                }
+              }}
+            />
           </View>
-          <Text style={styles.memberCardName}>{member?.name ?? 'Member'}</Text>
-          <Text style={styles.memberCardDetail}>
-            {member?.city?.toUpperCase() ?? 'MINNEAPOLIS'} · {member?.type?.toUpperCase() ?? 'RIDER'} · {member?.memberSince ?? '2026'}
-          </Text>
-        </View>
 
-        {/* QR Code */}
-        <QRCodeCard name={member?.name ?? 'Member'} />
-
-        {/* Stats */}
-        <View style={styles.statsRow}>
-          <StatBlock label="LISTINGS" value="0" />
-          <StatBlock label="SOLD" value="0" />
-          <StatBlock label="RATING" value="4.7" />
+          <View style={styles.statsRow}>
+            <StatBlock
+              label={isBuilder ? 'LISTINGS' : 'GARAGE'}
+              value={String(isBuilder ? stats.listingCount : stats.garageCount)}
+            />
+            <StatBlock label={isBuilder ? 'SOLD' : 'MESSAGES'} value={String(isBuilder ? stats.soldCount : stats.messageCount)} />
+            <StatBlock label={isBuilder ? 'DRAFTS' : 'WATCHING'} value={String(isBuilder ? 0 : stats.garageCount)} />
+          </View>
         </View>
 
         <View style={styles.divider} />
 
         {/* Menu */}
         <View style={styles.menu}>
-          <MenuRow label="VIEW PUBLIC PROFILE" onPress={() => {
-            hapticLight();
-            router.push(`/builder/${member?.id ?? '1'}`);
-          }} />
-          <MenuRow label="MY LISTINGS" />
-          <MenuRow label="SAVED" />
-          <MenuRow label="ACCOUNT SETTINGS" />
-          <MenuRow label="MEMBERSHIP" />
+          {isBuilder ? (
+            <>
+              <MenuRow label="BUYER VIEW" onPress={() => {
+                hapticLight();
+                setActiveView('buyer');
+                router.replace('/(tabs)');
+              }} />
+              <MenuRow
+                label="CHANGE GARAGE DETAILS"
+                subtitle="Contact info, city, bio, and public profile"
+                onPress={() => {
+                  hapticLight();
+                  router.push('/garage/details');
+                }}
+              />
+              <MenuRow
+                label="MY LISTINGS"
+                subtitle="Active, sold, and draft bikes"
+                onPress={() => {
+                  hapticLight();
+                  router.replace('/(tabs)/shops');
+                }}
+              />
+              <MenuRow label="LIST A BIKE" onPress={() => router.push('/listing/create')} />
+              <MenuRow
+                label="INVITE BUYERS"
+                subtitle="Share the registry with riders"
+                onPress={() => {
+                  hapticLight();
+                  shareBuyerInvite();
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <MenuRow label="SELLER VIEW" onPress={() => {
+                hapticLight();
+                setActiveView('builder');
+                router.replace('/(tabs)');
+              }} />
+              <MenuRow
+                label="DREAM GARAGE"
+                subtitle="Saved bikes and bike scans"
+                onPress={() => {
+                  hapticLight();
+                  router.replace('/(tabs)/vault');
+                }}
+              />
+              <MenuRow
+                label="SEARCH"
+                subtitle="Find listings by year, make, or model"
+                onPress={() => {
+                  hapticLight();
+                  router.replace('/(tabs)/search');
+                }}
+              />
+              <MenuRow
+                label="INVITE A SELLER"
+                subtitle="Bring more bikes into the registry"
+                onPress={() => {
+                  hapticLight();
+                  shareSellerInvite();
+                }}
+              />
+            </>
+          )}
         </View>
 
         <View style={styles.divider} />
@@ -164,156 +227,98 @@ export default function ProfileScreen() {
 const styles = StyleSheet.create({
   container: S.screenContainer,
   divider: S.divider,
-  identity: {
+  summary: {
+    paddingHorizontal: SPACING.page,
+    paddingBottom: SPACING.xl,
+  },
+  summaryTop: {
+    flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: SPACING.xl,
+    gap: SPACING.md,
+    paddingTop: SPACING.lg,
+  },
+  summaryText: {
+    flex: 1,
   },
   avatarLarge: {
     ...S.avatarBase,
-    width: 72,
-    height: 72,
-    marginBottom: SPACING.md,
+    width: 86,
+    height: 86,
   },
   avatarLargeText: {
     ...S.avatarText,
-    fontSize: 28,
+    fontSize: 36,
   },
   name: {
     ...TYPE.sectionHeader,
-    fontSize: 20,
-    letterSpacing: -0.3,
-  },
-  verifiedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: SPACING.sm,
-    marginTop: SPACING.sm,
+    fontSize: 28,
+    letterSpacing: 0,
   },
   verifiedBadge: S.verifiedBadge,
   verifiedText: S.verifiedText,
-  memberType: {
-    ...TYPE.monoSmall,
-    fontFamily: F.monoSemiBold,
-    letterSpacing: 2,
-    color: COLORS.textSecondary,
-  },
   memberSince: {
-    ...TYPE.monoSmall,
-    letterSpacing: 1.5,
-    marginTop: SPACING.sm,
+    fontSize: 16,
+    fontFamily: F.semibold,
+    color: COLORS.textMuted,
+    marginTop: 4,
   },
-
-  // Garage rating
-  ratingWrap: {
+  city: {
+    fontSize: 15,
+    fontFamily: F.semibold,
+    letterSpacing: 0,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  quickActions: {
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
     gap: SPACING.sm,
-    marginBottom: SPACING.lg,
+    marginTop: SPACING.lg,
   },
-  ratingStars: {
-    flexDirection: 'row',
-    gap: 2,
-  },
-  ratingValue: {
-    fontSize: 14,
-    fontFamily: F.bold,
-    color: COLORS.textPrimary,
-  },
-  ratingLabel: {
-    fontSize: 9,
-    fontFamily: F.monoMedium,
-    letterSpacing: 1.5,
-    color: COLORS.textMuted,
-  },
-
-  // Membership card
-  memberCard: {
-    marginHorizontal: SPACING.page,
-    backgroundColor: COLORS.black,
-    padding: SPACING.lg,
-    marginBottom: SPACING.md,
-  },
-  memberCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: SPACING.md,
-  },
-  memberCardLogo: {
-    fontSize: 10,
-    fontFamily: F.bold,
-    letterSpacing: 3,
-    color: COLORS.whiteA30,
-  },
-  memberCardBadge: {
-    fontSize: 8,
-    fontFamily: F.monoBold,
-    letterSpacing: 2,
-    color: COLORS.black,
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-  },
-  memberCardName: {
-    fontSize: 20,
-    fontFamily: F.bold,
-    color: COLORS.white,
-    letterSpacing: -0.3,
-  },
-  memberCardDetail: {
-    fontSize: 9,
-    fontFamily: F.mono,
-    letterSpacing: 1.5,
-    color: COLORS.whiteA35,
-    marginTop: SPACING.sm,
-  },
-
-  // QR Code card
-  qrCard: {
-    marginHorizontal: SPACING.page,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: COLORS.surface,
-    padding: SPACING.md,
-    marginBottom: SPACING.lg,
-    gap: SPACING.md,
-  },
-  qrPlaceholder: {
-    width: 64,
-    height: 64,
-    backgroundColor: COLORS.black,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  qrInfo: {
+  switchButton: {
     flex: 1,
+    borderWidth: 1,
+    borderColor: COLORS.black,
+    paddingVertical: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  qrTitle: {
+  switchButtonText: {
     fontSize: 10,
     fontFamily: F.monoBold,
-    letterSpacing: 2,
+    letterSpacing: 1.5,
     color: COLORS.textPrimary,
   },
-  qrSub: {
-    fontSize: 12,
-    fontFamily: F.regular,
-    color: COLORS.textMuted,
-    lineHeight: 17,
-    marginTop: SPACING.xs,
+  compactQrRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
+    borderWidth: 1.5,
+    borderColor: COLORS.gray300,
+    borderRadius: 24,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 12,
+    justifyContent: 'center',
+  },
+  compactQrText: {
+    fontSize: 15,
+    fontFamily: F.bold,
+    letterSpacing: 0,
+    color: COLORS.textPrimary,
   },
 
   // Stats
   statsRow: {
     flexDirection: 'row',
-    paddingHorizontal: SPACING.page,
-    paddingVertical: SPACING.lg,
-    borderTopWidth: 0.5,
-    borderTopColor: COLORS.divider,
+    marginTop: SPACING.lg,
+    borderWidth: 0,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: COLORS.divider,
   },
   stat: {
     flex: 1,
     alignItems: 'center',
+    paddingVertical: SPACING.md,
   },
   statValue: {
     fontSize: 20,
@@ -331,22 +336,34 @@ const styles = StyleSheet.create({
   menuRow: {
     ...S.menuRow,
     paddingHorizontal: SPACING.page,
+    paddingVertical: 20,
+  },
+  menuText: {
+    flex: 1,
   },
   menuLabel: S.menuLabel,
+  menuSubtitle: {
+    fontSize: 15,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 4,
+    letterSpacing: 0,
+  },
   menuArrow: S.menuArrow,
   signOutButton: {
     marginHorizontal: SPACING.page,
     marginTop: SPACING.xl,
     borderWidth: 1,
-    borderColor: COLORS.gray300,
-    paddingVertical: SPACING.md,
+    borderColor: COLORS.black,
+    borderRadius: 30,
+    paddingVertical: 17,
     alignItems: 'center',
   },
   signOutText: {
-    ...TYPE.mono,
-    fontFamily: F.monoSemiBold,
-    letterSpacing: 2,
-    color: COLORS.textSecondary,
+    fontSize: 17,
+    fontFamily: F.bold,
+    letterSpacing: 0,
+    color: COLORS.textPrimary,
   },
   version: {
     ...TYPE.monoSmall,

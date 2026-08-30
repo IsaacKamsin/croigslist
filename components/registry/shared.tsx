@@ -3,7 +3,8 @@
  * Used across multiple registry sections
  */
 import { CATEGORIES } from "@/components/icons/CategoryIcons";
-import { BORDERS, COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING } from "@/constants/design";
+import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING } from "@/constants/design";
+import { formatUsd } from "@/lib/formatters";
 import { Image } from "expo-image";
 import React from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
@@ -18,6 +19,7 @@ export const ViewerDot = React.memo(({ count }: { count: number }) => {
     </View>
   );
 });
+ViewerDot.displayName = "ViewerDot";
 
 // ── HamburgerIcon ────────────────────────────────────────────────────
 export function HamburgerIcon() {
@@ -53,6 +55,7 @@ export const SectionHead = React.memo(
     </View>
   ),
 );
+SectionHead.displayName = "SectionHead";
 
 // ── HCard (horizontal listing card) ──────────────────────────────────
 export const HCard = React.memo(
@@ -78,10 +81,11 @@ export const HCard = React.memo(
         {year} · {make}
       </Text>
       <Text style={s.hcardModel}>{model}</Text>
-      <Text style={s.hcardPrice}>${price.toLocaleString()}</Text>
+      <Text style={s.hcardPrice}>{formatUsd(price)}</Text>
     </Pressable>
   ),
 );
+HCard.displayName = "HCard";
 
 // ── CategoryBar ──────────────────────────────────────────────────────
 export const CategoryBar = React.memo(
@@ -112,6 +116,7 @@ export const CategoryBar = React.memo(
     </ScrollView>
   ),
 );
+CategoryBar.displayName = "CategoryBar";
 
 // ── Styles ────────────────────────────────────────────────────────────
 const P = SPACING.page;
@@ -151,7 +156,7 @@ export const s = StyleSheet.create({
     fontSize: 18,
     fontFamily: F.semibold,
     color: COLORS.textPrimary,
-    letterSpacing: -0.3,
+    letterSpacing: 0,
   },
   secSub: {
     fontSize: 11,
@@ -210,7 +215,7 @@ export const s = StyleSheet.create({
     fontFamily: F.bold,
     color: COLORS.textPrimary,
     marginTop: 1,
-    letterSpacing: -0.3,
+    letterSpacing: 0,
   },
   hcardPrice: {
     fontSize: 13,

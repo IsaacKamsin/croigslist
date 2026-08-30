@@ -60,16 +60,40 @@ export const dividerInset: ViewStyle = {
 /** Full-width black CTA */
 export const primaryButton: ViewStyle = {
   backgroundColor: COLORS.black,
+  minHeight: 64,
+  borderRadius: 32,
   paddingVertical: 18,
+  paddingHorizontal: SPACING.lg,
   alignItems: "center",
+  justifyContent: "center",
 };
 
 /** White text for primary button */
 export const primaryButtonText: TextStyle = {
   color: COLORS.white,
-  fontSize: 13,
+  fontSize: 18,
   fontFamily: F.bold,
-  letterSpacing: 2,
+  letterSpacing: 0,
+};
+
+/** White outlined CTA */
+export const secondaryButton: ViewStyle = {
+  minHeight: 64,
+  borderRadius: 32,
+  borderWidth: 2,
+  borderColor: COLORS.black,
+  paddingVertical: 18,
+  paddingHorizontal: SPACING.lg,
+  alignItems: "center",
+  justifyContent: "center",
+  backgroundColor: COLORS.white,
+};
+
+export const secondaryButtonText: TextStyle = {
+  color: COLORS.black,
+  fontSize: 18,
+  fontFamily: F.bold,
+  letterSpacing: 0,
 };
 
 /** Disabled state — apply alongside primaryButton */
@@ -79,29 +103,29 @@ export const buttonDisabled: ViewStyle = {
 
 // ── Form inputs ─────────────────────────────────────────────────────
 
-/** Bottom-bordered text input */
+/** Rounded marketplace text input */
 export const input: TextStyle = {
-  borderBottomWidth: 1.5,
-  borderBottomColor: COLORS.black,
-  paddingVertical: 10,
-  fontSize: 15,
+  borderWidth: 1.5,
+  borderColor: COLORS.gray300,
+  borderRadius: 10,
+  paddingHorizontal: 18,
+  paddingVertical: 16,
+  fontSize: 18,
   fontFamily: F.regular,
   color: COLORS.textPrimary,
 };
 
 /** Multi-line text area */
 export const textArea: TextStyle = {
-  borderBottomWidth: 0,
-  borderWidth: 1,
-  borderColor: COLORS.black,
-  padding: 12,
-  minHeight: 100,
+  minHeight: 124,
+  paddingTop: 16,
 };
 
 /** Form section label */
 export const formLabel: TextStyle = {
   ...TYPE.sectionHeader,
-  marginBottom: SPACING.sm,
+  fontSize: 18,
+  marginBottom: 10,
   marginTop: SPACING.lg,
 };
 
@@ -174,14 +198,15 @@ export const verifiedText: TextStyle = {
 
 /** Base avatar container — override width/height per screen */
 export const avatarBase: ViewStyle = {
-  backgroundColor: COLORS.surface,
+  backgroundColor: COLORS.gray400,
+  borderRadius: 999,
   justifyContent: "center",
   alignItems: "center",
 };
 
 export const avatarText: TextStyle = {
   fontFamily: F.bold,
-  color: COLORS.textPrimary,
+  color: COLORS.white,
 };
 
 // ── Empty state ─────────────────────────────────────────────────────
@@ -231,10 +256,11 @@ export const menuArrow: TextStyle = {
 // ── Filter chips ────────────────────────────────────────────────────
 
 export const filterChip: ViewStyle = {
-  borderWidth: 1,
-  borderColor: COLORS.divider,
-  paddingHorizontal: 14,
-  paddingVertical: 8,
+  borderWidth: 1.5,
+  borderColor: COLORS.gray300,
+  borderRadius: 24,
+  paddingHorizontal: 18,
+  paddingVertical: 12,
 };
 
 export const filterChipActive: ViewStyle = {
@@ -243,10 +269,10 @@ export const filterChipActive: ViewStyle = {
 };
 
 export const filterChipText: TextStyle = {
-  fontSize: 9,
-  fontFamily: F.monoBold,
-  letterSpacing: 1.5,
-  color: COLORS.textMuted,
+  fontSize: 16,
+  fontFamily: F.semibold,
+  letterSpacing: 0,
+  color: COLORS.textSecondary,
 };
 
 export const filterChipTextActive: TextStyle = {
@@ -311,4 +337,6 @@ export const S = {
   section,
   sectionTitle,
   actionsFooter,
+  secondaryButton,
+  secondaryButtonText,
 } as const;

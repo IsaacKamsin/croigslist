@@ -3,17 +3,11 @@
  * Each section is isolated and memo'd for scroll performance
  */
 import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING } from "@/constants/design";
-import {
-  FEATURED,
-  JUST_LISTED,
-  PROJECT_BIKES,
-  RARE_FINDS,
-  SHOPS,
-  SOLD,
-  UNDER_5K,
-} from "@/data/registry";
+import { formatUsd } from "@/lib/formatters";
+import type { RegistryListing, RegistryShop, SoldListing } from "@/lib/registry-db";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
+import { HeartIcon } from "phosphor-react-native";
 import React from "react";
 import {
   Dimensions,
@@ -23,7 +17,7 @@ import {
   Text,
   View,
 } from "react-native";
-import { HCard, SectionHead, ViewerDot, s as shared } from "./shared";
+import { SectionHead, ViewerDot, s as shared } from "./shared";
 
 const P = SPACING.page;
 const SCREEN_W = Dimensions.get("window").width;
@@ -32,11 +26,17 @@ const GRID_CARD_W = (SCREEN_W - P * 2 - GRID_GAP) / 2;
 
 // ── Hero ─────────────────────────────────────────────────────────────
 export const HeroSection = React.memo(
-  ({ onPress }: { onPress: () => void }) => (
+  ({
+    featured,
+    onPress,
+  }: {
+    featured: RegistryListing;
+    onPress: () => void;
+  }) => (
     <Pressable style={s.heroWrap} onPress={onPress}>
       <View style={s.hero}>
         <Image
-          source={{ uri: FEATURED.image }}
+          source={{ uri: featured.image }}
           style={s.heroImg}
           contentFit="cover"
           cachePolicy={IMAGE_CACHE}
@@ -50,14 +50,14 @@ export const HeroSection = React.memo(
           <View />
           <View>
             <Text style={s.heroMeta}>
-              {FEATURED.year} · {FEATURED.make}
+              {featured.year} · {featured.make}
             </Text>
-            <Text style={s.heroModel}>{FEATURED.model}</Text>
+            <Text style={s.heroModel}>{featured.model}</Text>
             <View style={s.heroBottom}>
               <Text style={s.heroPrice}>
-                ${FEATURED.price.toLocaleString()}
+                {formatUsd(featured.price)}
               </Text>
-              <ViewerDot count={FEATURED.viewers} />
+              <ViewerDot count={featured.viewers} />
             </View>
           </View>
         </LinearGradient>
@@ -65,6 +65,7 @@ export const HeroSection = React.memo(
     </Pressable>
   ),
 );
+HeroSection.displayName = "HeroSection";
 
 // ── WideCard (full-width editorial card with overlay) ───────────────
 const WideCard = React.memo(
@@ -73,7 +74,7 @@ const WideCard = React.memo(
     onPress,
     height = 220,
   }: {
-    item: (typeof JUST_LISTED)[0];
+    item: RegistryListing;
     onPress: () => void;
     height?: number;
   }) => (
@@ -99,12 +100,13 @@ const WideCard = React.memo(
             {item.year} · {item.make}
           </Text>
           <Text style={s.wideCardModel}>{item.model}</Text>
-          <Text style={s.wideCardPrice}>${item.price.toLocaleString()}</Text>
+          <Text style={s.wideCardPrice}>{formatUsd(item.price)}</Text>
         </View>
       </LinearGradient>
     </Pressable>
   ),
 );
+WideCard.displayName = "WideCard";
 
 // ── GridCard (half-width card with text below) ──────────────────────
 const GridCard = React.memo(
@@ -112,7 +114,7 @@ const GridCard = React.memo(
     item,
     onPress,
   }: {
-    item: (typeof JUST_LISTED)[0];
+    item: RegistryListing;
     onPress: () => void;
   }) => (
     <Pressable style={s.gridCard} onPress={onPress}>
@@ -130,22 +132,64 @@ const GridCard = React.memo(
             <Text style={s.gridCardViewerText}>{item.viewers}</Text>
           </View>
         )}
+        <View style={s.gridCardHeart}>
+          <HeartIcon color={COLORS.white} size={25} weight="bold" />
+        </View>
       </View>
       <Text style={s.gridCardMeta}>
         {item.year} · {item.make}
       </Text>
       <Text style={s.gridCardModel}>{item.model}</Text>
-      <Text style={s.gridCardPrice}>${item.price.toLocaleString()}</Text>
+      <Text style={s.gridCardPrice}>{formatUsd(item.price)}</Text>
     </Pressable>
   ),
 );
+GridCard.displayName = "GridCard";
+
+// ── Listing Grid ────────────────────────────────────────────────────
+export const ListingGridSection = React.memo(
+  ({
+    title,
+    sub,
+    items,
+    goListing,
+    onSeeAll,
+  }: {
+    title: string;
+    sub?: string;
+    items: RegistryListing[];
+    goListing: (id: string) => void;
+    onSeeAll?: () => void;
+  }) => (
+    <View>
+      <SectionHead title={title} sub={sub} onSeeAll={onSeeAll} />
+      <FlatList
+        data={items.slice(0, 10)}
+        keyExtractor={(item) => item.id}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={s.gridRailContent}
+        ItemSeparatorComponent={() => <View style={s.gridRailGap} />}
+        renderItem={({ item }) => (
+          <GridCard
+            item={item}
+            onPress={() => goListing(item.id)}
+          />
+        )}
+      />
+    </View>
+  ),
+);
+ListingGridSection.displayName = "ListingGridSection";
 
 // ── Just Listed ──────────────────────────────────────────────────────
 export const JustListedSection = React.memo(
   ({
+    items,
     goListing,
     onSeeAll,
   }: {
+    items: RegistryListing[];
     goListing: (id: string) => void;
     onSeeAll: () => void;
   }) => (
@@ -157,10 +201,10 @@ export const JustListedSection = React.memo(
       />
       {/* Lead hero card */}
       <View style={s.editorialPad}>
-        {JUST_LISTED[0] && (
+        {items[0] && (
           <WideCard
-            item={JUST_LISTED[0]}
-            onPress={() => goListing(JUST_LISTED[0].id)}
+            item={items[0]}
+            onPress={() => goListing(items[0].id)}
             height={240}
           />
         )}
@@ -168,7 +212,7 @@ export const JustListedSection = React.memo(
 
       {/* Two-column grid pair */}
       <View style={s.gridRow}>
-        {JUST_LISTED.slice(1, 3).map((item) => (
+        {items.slice(1, 3).map((item) => (
           <GridCard
             key={item.id}
             item={item}
@@ -178,24 +222,27 @@ export const JustListedSection = React.memo(
       </View>
 
       {/* Trailing wide card */}
-      {JUST_LISTED[3] && (
+      {items[3] && (
         <View style={s.editorialPad}>
           <WideCard
-            item={JUST_LISTED[3]}
-            onPress={() => goListing(JUST_LISTED[3].id)}
+            item={items[3]}
+            onPress={() => goListing(items[3].id)}
           />
         </View>
       )}
     </View>
   ),
 );
+JustListedSection.displayName = "JustListedSection";
 
 // ── Under $5K ────────────────────────────────────────────────────────
 export const Under5kSection = React.memo(
   ({
+    items,
     goListing,
     onSeeAll,
   }: {
+    items: RegistryListing[];
     goListing: (id: string) => void;
     onSeeAll: () => void;
   }) => (
@@ -207,10 +254,10 @@ export const Under5kSection = React.memo(
       />
       {/* Lead hero card */}
       <View style={s.editorialPad}>
-        {UNDER_5K[0] && (
+        {items[0] && (
           <WideCard
-            item={UNDER_5K[0]}
-            onPress={() => goListing(UNDER_5K[0].id)}
+            item={items[0]}
+            onPress={() => goListing(items[0].id)}
             height={240}
           />
         )}
@@ -218,7 +265,7 @@ export const Under5kSection = React.memo(
 
       {/* Two-column grid pair */}
       <View style={s.gridRow}>
-        {UNDER_5K.slice(1, 3).map((item) => (
+        {items.slice(1, 3).map((item) => (
           <GridCard
             key={item.id}
             item={item}
@@ -229,15 +276,22 @@ export const Under5kSection = React.memo(
     </View>
   ),
 );
+Under5kSection.displayName = "Under5kSection";
 
 // ── Rare Finds ───────────────────────────────────────────────────────
 export const RareFindsSection = React.memo(
-  ({ goListing }: { goListing: (id: string) => void }) => (
+  ({
+    items,
+    goListing,
+  }: {
+    items: RegistryListing[];
+    goListing: (id: string) => void;
+  }) => (
     <View>
       <SectionHead title="Rare finds" sub="The kind you tell stories about finding." />
       <FlatList
         horizontal
-        data={RARE_FINDS}
+        data={items}
         keyExtractor={(i) => i.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={shared.hscroll}
@@ -266,7 +320,7 @@ export const RareFindsSection = React.memo(
                 <Text style={s.rareName}>
                   {item.year} {item.make} {item.model}
                 </Text>
-                <Text style={s.rarePrice}>${item.price.toLocaleString()}</Text>
+                <Text style={s.rarePrice}>{formatUsd(item.price)}</Text>
               </View>
             </LinearGradient>
           </Pressable>
@@ -275,13 +329,16 @@ export const RareFindsSection = React.memo(
     </View>
   ),
 );
+RareFindsSection.displayName = "RareFindsSection";
 
 // ── Project Bikes ────────────────────────────────────────────────────
 export const ProjectBikesSection = React.memo(
   ({
+    items,
     goListing,
     onSeeAll,
   }: {
+    items: RegistryListing[];
     goListing: (id: string) => void;
     onSeeAll: () => void;
   }) => (
@@ -293,7 +350,7 @@ export const ProjectBikesSection = React.memo(
       />
       {/* Two-column grid pair */}
       <View style={s.gridRow}>
-        {PROJECT_BIKES.slice(0, 2).map((item) => (
+        {items.slice(0, 2).map((item) => (
           <GridCard
             key={item.id}
             item={item}
@@ -303,36 +360,43 @@ export const ProjectBikesSection = React.memo(
       </View>
 
       {/* Trailing wide card */}
-      {PROJECT_BIKES[2] && (
+      {items[2] && (
         <View style={s.editorialPad}>
           <WideCard
-            item={PROJECT_BIKES[2]}
-            onPress={() => goListing(PROJECT_BIKES[2].id)}
+            item={items[2]}
+            onPress={() => goListing(items[2].id)}
           />
         </View>
       )}
     </View>
   ),
 );
+ProjectBikesSection.displayName = "ProjectBikesSection";
 
 // ── Shops ─────────────────────────────────────────────────────────────
 export const ShopsSection = React.memo(
   ({
+    shops,
     goShop,
     onSeeAll,
+    title = "Shops you might like",
+    sub = "Builders, private sellers, and shops worth following.",
   }: {
+    shops: RegistryShop[];
     goShop: (slug: string) => void;
     onSeeAll: () => void;
+    title?: string;
+    sub?: string;
   }) => (
     <View>
       <SectionHead
-        title="Minneapolis shops"
-        sub="The hands behind the machines. Vetted, trusted, local."
+        title={title}
+        sub={sub}
         onSeeAll={onSeeAll}
       />
       <FlatList
         horizontal
-        data={SHOPS}
+        data={shops}
         keyExtractor={(i) => i.id}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={shared.hscroll}
@@ -360,15 +424,22 @@ export const ShopsSection = React.memo(
     </View>
   ),
 );
+ShopsSection.displayName = "ShopsSection";
 
 // ── Feature ──────────────────────────────────────────────────────────
 export const FeatureSection = React.memo(
-  ({ goBuilder }: { goBuilder: (id: string) => void }) => (
+  ({
+    shop,
+    goShop,
+  }: {
+    shop: RegistryShop;
+    goShop: (slug: string) => void;
+  }) => (
     <View style={s.featureWrap}>
-      <Pressable style={s.feature} onPress={() => goBuilder("u2")}>
+      <Pressable style={s.feature} onPress={() => goShop(shop.slug)}>
         <Image
           source={{
-            uri: "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=900&q=80",
+            uri: shop.image,
           }}
           style={s.featureImg}
           contentFit="cover"
@@ -384,10 +455,9 @@ export const FeatureSection = React.memo(
             <Text style={s.featureLabel}>FEATURE</Text>
           </View>
           <View>
-            <Text style={s.featureTitle}>Twin Cities Moto Co.</Text>
+            <Text style={s.featureTitle}>{shop.name}</Text>
             <Text style={s.featureQuote}>
-              "Every machine that leaves this shop runs like the day it rolled
-              off the line."
+              {shop.tagline ?? shop.specialty}
             </Text>
             <View style={s.featureCta}>
               <Text style={s.featureCtaText}>READ THEIR STORY</Text>
@@ -398,14 +468,16 @@ export const FeatureSection = React.memo(
     </View>
   ),
 );
+FeatureSection.displayName = "FeatureSection";
 
 // ── Sold ──────────────────────────────────────────────────────────────
-export const SoldSection = React.memo(() => (
+export const SoldSection = React.memo(
+  ({ items }: { items: SoldListing[] }) => (
   <View>
     <SectionHead title="Recently sold" sub="Gone. You hesitated. Don't let the next one slip." />
     <FlatList
       horizontal
-      data={SOLD}
+      data={items}
       keyExtractor={(_, i) => String(i)}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={shared.hscroll}
@@ -427,12 +499,13 @@ export const SoldSection = React.memo(() => (
           <Text style={s.soldName}>
             {item.make} {item.model}
           </Text>
-          <Text style={s.soldPrice}>${item.price.toLocaleString()}</Text>
+          <Text style={s.soldPrice}>{formatUsd(item.price)}</Text>
         </View>
       )}
     />
   </View>
 ));
+SoldSection.displayName = "SoldSection";
 
 
 // ── Section-specific styles ──────────────────────────────────────────
@@ -444,6 +517,14 @@ const s = StyleSheet.create({
     paddingHorizontal: P,
     gap: GRID_GAP,
     marginTop: GRID_GAP,
+  },
+  gridRailContent: {
+    paddingHorizontal: P,
+    marginTop: GRID_GAP,
+    paddingBottom: 2,
+  },
+  gridRailGap: {
+    width: GRID_GAP,
   },
 
   // WideCard
@@ -470,7 +551,7 @@ const s = StyleSheet.create({
     fontSize: 24,
     fontFamily: F.bold,
     color: COLORS.white,
-    letterSpacing: -0.5,
+    letterSpacing: 0,
     marginTop: 2,
     alignSelf: "flex-start",
   },
@@ -487,8 +568,9 @@ const s = StyleSheet.create({
   gridCard: { width: GRID_CARD_W },
   gridCardImgWrap: {
     width: GRID_CARD_W,
-    height: GRID_CARD_W * 1.3,
+    height: GRID_CARD_W,
     backgroundColor: COLORS.surface,
+    borderRadius: 6,
     overflow: "hidden",
   },
   gridCardImg: { width: "100%", height: "100%" },
@@ -514,25 +596,38 @@ const s = StyleSheet.create({
     fontFamily: F.monoBold,
     color: COLORS.white,
   },
+  gridCardHeart: {
+    position: "absolute",
+    right: 8,
+    bottom: 8,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.overlay35,
+    borderWidth: 1,
+    borderColor: COLORS.whiteA50,
+  },
   gridCardMeta: {
-    fontSize: 9,
-    fontFamily: F.mono,
-    color: COLORS.textFaint,
-    letterSpacing: 1,
+    fontSize: 12,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    letterSpacing: 0,
     marginTop: 8,
   },
   gridCardModel: {
-    fontSize: 16,
-    fontFamily: F.bold,
+    fontSize: 15,
+    fontFamily: F.semibold,
     color: COLORS.textPrimary,
-    marginTop: 1,
-    letterSpacing: -0.3,
+    marginTop: 2,
+    letterSpacing: 0,
   },
   gridCardPrice: {
-    fontSize: 13,
-    fontFamily: F.monoBold,
+    fontSize: 14,
+    fontFamily: F.bold,
     color: COLORS.textPrimary,
-    marginTop: 4,
+    marginTop: 3,
   },
 
   // Hero
@@ -559,7 +654,7 @@ const s = StyleSheet.create({
     fontSize: 28,
     fontFamily: F.bold,
     color: COLORS.white,
-    letterSpacing: -0.8,
+    letterSpacing: 0,
     lineHeight: 30,
     marginTop: 2,
   },
@@ -673,7 +768,7 @@ const s = StyleSheet.create({
     fontSize: 20,
     fontFamily: F.bold,
     color: COLORS.white,
-    letterSpacing: -0.3,
+    letterSpacing: 0,
   },
   featureQuote: {
     fontSize: 11.5,

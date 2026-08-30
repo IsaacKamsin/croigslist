@@ -1,36 +1,21 @@
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { COLORS, F, SPACING, TYPE } from "@/constants/design";
 import { S } from "@/constants/styles";
+import { fetchMessageThreads, type MessageThread } from "@/lib/messages-db";
+import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "expo-router";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
-const MOCK_THREADS = [
-  {
-    id: "1",
-    name: "Jake Morrison",
-    lastMessage: "Is the CB550 still available?",
-    time: "2h",
-    unread: true,
-  },
-  {
-    id: "2",
-    name: "Twin Cities Moto Co.",
-    lastMessage: "We can have the carbs rebuilt by Friday.",
-    time: "1d",
-    unread: false,
-  },
-  {
-    id: "3",
-    name: "Maria Chen",
-    lastMessage: "Sent you the title photos.",
-    time: "3d",
-    unread: false,
-  },
-];
-
-function ThreadRow({ item }: { item: (typeof MOCK_THREADS)[0] }) {
+function ThreadRow({
+  item,
+  onPress,
+}: {
+  item: MessageThread;
+  onPress: () => void;
+}) {
   return (
-    <Pressable style={styles.thread}>
+    <Pressable style={styles.thread} onPress={onPress}>
       <View style={styles.avatar}>
         <Text style={styles.avatarText}>{item.name[0]}</Text>
       </View>
@@ -45,7 +30,7 @@ function ThreadRow({ item }: { item: (typeof MOCK_THREADS)[0] }) {
           <Text style={styles.threadTime}>{item.time}</Text>
         </View>
         <Text style={styles.threadMessage} numberOfLines={1}>
-          {item.lastMessage}
+          {item.last}
         </Text>
       </View>
 
@@ -55,22 +40,47 @@ function ThreadRow({ item }: { item: (typeof MOCK_THREADS)[0] }) {
 }
 
 export default function MessagesScreen() {
+  const router = useRouter();
+  const { data: threads } = useQuery({
+    queryKey: ["message-threads"],
+    queryFn: fetchMessageThreads,
+    initialData: [] as MessageThread[],
+    refetchOnMount: "always",
+    refetchOnReconnect: true,
+  });
+
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <ScreenHeader title="MESSAGES" />
 
       <FlatList
-        data={MOCK_THREADS}
+        data={threads}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <ThreadRow item={item} />}
+        renderItem={({ item }) => (
+          <ThreadRow
+            item={item}
+            onPress={() =>
+              router.push({
+                pathname: "/messages/[id]",
+                params: { id: item.id, sellerName: item.name },
+              })
+            }
+          />
+        )}
         ItemSeparatorComponent={() => <View style={styles.separator} />}
         contentContainerStyle={styles.list}
         ListEmptyComponent={
           <View style={styles.empty}>
             <Text style={styles.emptyText}>NO MESSAGES YET</Text>
             <Text style={styles.emptySubtext}>
-              Real conversations between real people. Find a bike, message the seller — no bots, no dealers, no noise.
+              Find a bike or builder, then start a real conversation.
             </Text>
+            <Pressable
+              style={styles.emptyButton}
+              onPress={() => router.replace("/(tabs)/shops")}
+            >
+              <Text style={styles.emptyButtonText}>BROWSE BUILDERS</Text>
+            </Pressable>
           </View>
         }
       />
@@ -137,4 +147,16 @@ const styles = StyleSheet.create({
   empty: S.emptyContainer,
   emptyText: S.emptyTitle,
   emptySubtext: S.emptyBody,
+  emptyButton: {
+    marginTop: SPACING.lg,
+    backgroundColor: COLORS.black,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: 14,
+  },
+  emptyButtonText: {
+    fontSize: 10,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.4,
+    color: COLORS.white,
+  },
 });
