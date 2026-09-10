@@ -1,6 +1,7 @@
 import { COLORS, F, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
 import { useAuth } from "@/context/AuthContext";
+import { getAuthErrorMessage } from "@/lib/auth-error-messages";
 import { backOrReplace } from "@/lib/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "expo-router";
@@ -41,8 +42,9 @@ export default function LoginScreen() {
     try {
       await signIn(values.email, values.password);
     } catch (e: any) {
+      console.warn("Login failed.", e?.message ?? e);
       setError("root", {
-        message: e?.message ?? "Login failed. Check your credentials and try again.",
+        message: getAuthErrorMessage(e),
       });
     }
   };

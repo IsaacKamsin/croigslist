@@ -471,7 +471,7 @@ export default function RegistryScreen() {
                   <ProfileRails profiles={shops} onOpenProfile={goProfile} />
                 )}
                 {registryData.sold.length > 0 && (
-                  <SoldSection items={registryData.sold} />
+                  <SoldSection items={registryData.sold} goListing={goListing} />
                 )}
               </>
             )}

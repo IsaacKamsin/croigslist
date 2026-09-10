@@ -470,18 +470,24 @@ FeatureSection.displayName = "FeatureSection";
 
 // ── Sold ──────────────────────────────────────────────────────────────
 export const SoldSection = React.memo(
-  ({ items }: { items: SoldListing[] }) => (
+  ({
+    items,
+    goListing,
+  }: {
+    items: SoldListing[];
+    goListing: (id: string) => void;
+  }) => (
   <View>
     <SectionHead title="Recently sold" sub="Gone. You hesitated. Don't let the next one slip." />
     <FlatList
       horizontal
       data={items}
-      keyExtractor={(_, i) => String(i)}
+      keyExtractor={(item) => item.id}
       showsHorizontalScrollIndicator={false}
       contentContainerStyle={shared.hscroll}
       removeClippedSubviews
       renderItem={({ item }) => (
-        <View style={s.soldCard}>
+        <Pressable style={s.soldCard} onPress={() => goListing(item.id)}>
           <View style={s.soldImgWrap}>
             <Image
               source={{ uri: item.image }}
@@ -498,7 +504,7 @@ export const SoldSection = React.memo(
             {item.make} {item.model}
           </Text>
           <Text style={s.soldPrice}>{formatUsd(item.price)}</Text>
-        </View>
+        </Pressable>
       )}
     />
   </View>

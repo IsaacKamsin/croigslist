@@ -5,6 +5,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { MemberType, useAuth } from '@/context/AuthContext';
 import { COLORS, F, SPACING, TYPE } from '@/constants/design';
 import { S } from '@/constants/styles';
+import { getSignupErrorMessage } from '@/lib/auth-error-messages';
 import { backOrReplace } from '@/lib/navigation';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
@@ -60,7 +61,8 @@ export default function ApplyScreen() {
       }
       router.replace('/(tabs)');
     } catch (e: any) {
-      setError('root', { message: e?.message ?? 'Something went wrong. Try again.' });
+      console.warn('Account creation failed.', e?.message ?? e);
+      setError('root', { message: getSignupErrorMessage(e) });
     }
   };
 
@@ -112,20 +114,14 @@ export default function ApplyScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
         >
           <Pressable onPress={() => backOrReplace(router, '/(auth)/welcome')} style={styles.backBtn}>
             <Text style={styles.backText}>X</Text>
           </Pressable>
 
           <View style={styles.header}>
-            <View style={styles.progressTrack}>
-              <View style={styles.progressFill} />
-            </View>
-            <Text style={styles.title}>Let us set up your account.</Text>
-            <Text style={styles.description}>
-              Pick a view and create your login. Start with 3 days free, then
-              $100/year.
-            </Text>
+            <Text style={styles.title}>Create account.</Text>
           </View>
 
           <View style={styles.panel}>
@@ -150,12 +146,6 @@ export default function ApplyScreen() {
                 </Pressable>
               ))}
             </View>
-            <Text style={styles.typeHint}>
-              {type === 'builder'
-                ? 'Seller view starts with listings and profile tools.'
-                : 'Buy view starts with search, saves, and profiles.'}
-            </Text>
-
             <View style={styles.field}>
               <Text style={styles.label}>INVITE CODE</Text>
               <Controller
@@ -229,10 +219,6 @@ export default function ApplyScreen() {
               {isSubmitting ? 'Creating...' : 'Continue'}
             </Text>
           </Pressable>
-
-          <Text style={styles.footnote}>
-            You can switch Buy and Sell views anytime from Profile.
-          </Text>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -260,8 +246,8 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
   },
   header: {
-    marginTop: SPACING.lg,
-    marginBottom: 42,
+    marginTop: 82,
+    marginBottom: SPACING.xl,
   },
   progressTrack: {
     height: 10,
@@ -280,19 +266,11 @@ const styles = StyleSheet.create({
     width: "100%",
   },
   title: {
-    fontSize: 48,
+    fontSize: 42,
     fontFamily: F.bold,
-    lineHeight: 52,
+    lineHeight: 44,
     letterSpacing: 0,
     color: COLORS.textPrimary,
-  },
-  description: {
-    fontSize: 18,
-    fontFamily: F.regular,
-    lineHeight: 21,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.md,
-    maxWidth: 330,
   },
   panel: {
     backgroundColor: COLORS.white,
@@ -313,7 +291,7 @@ const styles = StyleSheet.create({
   typeRow: {
     flexDirection: 'row',
     gap: SPACING.sm,
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.sm,
   },
   typeChip: {
     ...S.filterChip,
@@ -328,13 +306,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
   },
   typeChipTextActive: S.filterChipTextActive,
-  typeHint: {
-    fontSize: 15,
-    fontFamily: F.regular,
-    lineHeight: 17,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.sm,
-  },
   error: {
     fontSize: 12,
     fontFamily: F.monoMedium,
@@ -347,11 +318,6 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: S.buttonDisabled,
   buttonText: S.primaryButtonText,
-  footnote: {
-    ...TYPE.monoSmall,
-    textAlign: 'center',
-    marginTop: SPACING.md,
-  },
   inboxWrap: {
     flex: 1,
     paddingHorizontal: SPACING.page,

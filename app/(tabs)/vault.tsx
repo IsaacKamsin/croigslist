@@ -35,6 +35,7 @@ import BottomSheet, {
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
+import { CameraIcon } from "phosphor-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -421,25 +422,10 @@ export default function GarageScreen() {
     loadGarage();
   }, [loadGarage]);
 
-  const handleUpload = async (replaceBike?: GarageBike) => {
-    hapticMedium();
-    console.log("🟡 [Vault] Upload started");
-
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) return;
-
-    const pickerResult = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      quality: 0.8,
-      base64: true,
-      allowsMultipleSelection: false,
-      preferredAssetRepresentationMode:
-        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
-    });
-
-    if (pickerResult.canceled || !pickerResult.assets?.[0]) return;
-
-    const asset = pickerResult.assets[0];
+  const savePickedBikePhoto = async (
+    asset: ImagePicker.ImagePickerAsset,
+    replaceBike?: GarageBike,
+  ) => {
     const imageUri = asset.uri;
     const imageData = asset.base64
       ? { base64: asset.base64, mimeType: "image/jpeg" }
@@ -591,6 +577,61 @@ export default function GarageScreen() {
     }
   };
 
+  const handleCameraUpload = async (replaceBike?: GarageBike) => {
+    hapticMedium();
+    console.log("🟡 [Vault] Camera upload started");
+
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Camera access needed", "Allow camera access to add a saved bike.");
+      return;
+    }
+
+    let cameraResult: ImagePicker.ImagePickerResult;
+    try {
+      cameraResult = await ImagePicker.launchCameraAsync({
+        mediaTypes: ["images"],
+        quality: 0.8,
+        base64: true,
+        allowsEditing: true,
+        preferredAssetRepresentationMode:
+          ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+      });
+    } catch (error) {
+      console.warn(
+        "Camera unavailable; opening photo library.",
+        error instanceof Error ? error.message : error,
+      );
+      await handleUpload(replaceBike);
+      return;
+    }
+
+    if (cameraResult.canceled || !cameraResult.assets?.[0]) return;
+
+    await savePickedBikePhoto(cameraResult.assets[0], replaceBike);
+  };
+
+  const handleUpload = async (replaceBike?: GarageBike) => {
+    hapticMedium();
+    console.log("🟡 [Vault] Upload started");
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) return;
+
+    const pickerResult = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      quality: 0.8,
+      base64: true,
+      allowsMultipleSelection: false,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
+
+    if (pickerResult.canceled || !pickerResult.assets?.[0]) return;
+
+    await savePickedBikePhoto(pickerResult.assets[0], replaceBike);
+  };
+
   const removeBike = useCallback((bike: GarageBike) => {
     const bikeName = [bike.brand, bike.model].filter(Boolean).join(" ") || "this bike";
     Alert.alert(
@@ -688,7 +729,23 @@ export default function GarageScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
-        <ScreenHeader title="SAVED BIKES" />
+        <ScreenHeader
+          title="SAVED BIKES"
+          right={
+            <Pressable
+              style={({ pressed }) => [
+                styles.headerCameraButton,
+                pressed && styles.headerCameraButtonPressed,
+              ]}
+              onPress={() => handleCameraUpload()}
+              accessibilityRole="button"
+              accessibilityLabel="Open camera"
+            >
+              <CameraIcon size={22} color={COLORS.textPrimary} weight="bold" />
+              <Text style={styles.headerCameraText}>ADD</Text>
+            </Pressable>
+          }
+        />
 
         {!isLoadingGarage && hasBikes && (
           <PagePad style={styles.listHeader}>
@@ -698,15 +755,6 @@ export default function GarageScreen() {
                 Watching for matching listings.
               </BodySmall>
             </View>
-            <Pressable
-              style={({ pressed }) => [
-                styles.listAddButton,
-                pressed && styles.listAddButtonPressed,
-              ]}
-              onPress={() => handleUpload()}
-            >
-              <Text style={styles.listAddButtonText}>+ ADD</Text>
-            </Pressable>
           </PagePad>
         )}
 
@@ -781,7 +829,7 @@ export default function GarageScreen() {
                   styles.emptyCta,
                   pressed && styles.emptyCtaPressed,
                 ]}
-                onPress={() => handleUpload()}
+                onPress={() => handleCameraUpload()}
               >
                 <Text style={styles.emptyCtaText}>+ ADD PHOTO</Text>
               </Pressable>
@@ -923,6 +971,29 @@ const styles = StyleSheet.create({
   title: S.screenTitle,
   headerDivider: S.divider,
   content: { flexGrow: 1 },
+  headerCameraButton: {
+    minWidth: 84,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: 14,
+  },
+  headerCameraButtonPressed: {
+    backgroundColor: COLORS.gray100,
+  },
+  headerCameraText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.4,
+    color: COLORS.textPrimary,
+  },
   sellerGuard: {
     marginHorizontal: SPACING.page,
     marginTop: SPACING.xl,
@@ -1042,21 +1113,6 @@ const styles = StyleSheet.create({
     fontFamily: F.monoBold,
     letterSpacing: 1.6,
     color: COLORS.textFaint,
-  },
-  listAddButton: {
-    backgroundColor: COLORS.black,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-  },
-  listAddButtonPressed: {
-    opacity: 0.82,
-  },
-  listAddButtonText: {
-    fontSize: 10,
-    fontFamily: F.monoBold,
-    letterSpacing: 1.6,
-    color: COLORS.white,
   },
   grid: {
     flexDirection: "row",

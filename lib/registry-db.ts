@@ -1,4 +1,3 @@
-import { SHOPS } from "@/data/registry";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatYear } from "@/lib/formatters";
 import { createId } from "@/lib/ids";
@@ -54,6 +53,7 @@ export type ListingImageInput =
     };
 
 export type SoldListing = {
+  id: string;
   make: string;
   model: string;
   price: number;
@@ -208,6 +208,16 @@ function hasRealListingOwner(row: ListingRow) {
   return Boolean(row.seller_id || row.shop_id);
 }
 
+function activeListingCounts(rows: ListingRow[], ownerKey: "seller_id" | "shop_id") {
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const ownerId = row[ownerKey];
+    if (!ownerId || row.status !== "active") continue;
+    counts.set(ownerId, (counts.get(ownerId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 function sellerNameFromProfile(profile: ProfileBuilderRow | null) {
   return profile?.garage_name || profile?.full_name || profile?.handle || undefined;
 }
@@ -216,14 +226,14 @@ function sellerImageFromProfile(profile: ProfileBuilderRow | null) {
   return profile?.garage_image_url || profile?.avatar_url || undefined;
 }
 
-function shopFromRow(row: ShopRow): RegistryShop {
+function shopFromRow(row: ShopRow, buildsCount = row.builds_count ?? 0): RegistryShop {
   return {
     id: row.id,
     slug: row.slug ?? row.id,
     kind: "shop",
     name: row.name ?? "Seller",
     specialty: row.specialty ?? "Motorcycles",
-    builds: row.builds_count ?? 0,
+    builds: buildsCount,
     image: row.image_url ?? "",
     tagline: row.tagline ?? undefined,
     verified: Boolean(row.verified),
@@ -238,7 +248,10 @@ function shopFromRow(row: ShopRow): RegistryShop {
   };
 }
 
-function builderFromProfile(row: ProfileBuilderRow): RegistryShop {
+function builderFromProfile(
+  row: ProfileBuilderRow,
+  buildsCount = row.bikes_count ?? 0,
+): RegistryShop {
   const name = row.garage_name || row.full_name || row.handle || "Seller";
   return {
     id: row.id,
@@ -246,7 +259,7 @@ function builderFromProfile(row: ProfileBuilderRow): RegistryShop {
     kind: "profile",
     name,
     specialty: row.bio || "Private seller",
-    builds: row.bikes_count ?? 0,
+    builds: buildsCount,
     image: row.garage_image_url || row.avatar_url || "",
     tagline: row.city ? `${row.city} seller` : "Seller profile",
     verified: Boolean(row.is_verified),
@@ -383,13 +396,31 @@ export async function fetchRegistryData(): Promise<RegistryData> {
   const under5kRows = activeRows.filter((row) => (row.price ?? 0) < 5000);
   const rareRows = activeRows.filter((row) => row.is_rare);
   const projectRows = activeRows.filter((row) => row.is_project);
-  const shops = [...profileRows.map(builderFromProfile), ...shopRows.map(shopFromRow)];
+  const profileListingCounts = activeListingCounts(activeRows, "seller_id");
+  const shopListingCounts = activeListingCounts(activeRows, "shop_id");
+  const shops = [
+    ...profileRows
+      .map((profile) => ({
+        profile,
+        listingCount: profileListingCounts.get(profile.id) ?? 0,
+      }))
+      .filter(({ listingCount }) => listingCount > 0)
+      .map(({ profile, listingCount }) => builderFromProfile(profile, listingCount)),
+    ...shopRows
+      .map((shop) => ({
+        shop,
+        listingCount: shopListingCounts.get(shop.id) ?? 0,
+      }))
+      .filter(({ listingCount }) => listingCount > 0)
+      .map(({ shop, listingCount }) => shopFromRow(shop, listingCount)),
+  ];
   const visibleShops = shops;
   const featuredRow =
     activeRows.find((row) => row.is_featured) ?? activeRows[0] ?? null;
   const sold =
     soldRows.length > 0
       ? soldRows.slice(0, 10).map((row) => ({
+          id: row.id,
           make: row.make ?? "UNKNOWN",
           model: row.model ?? "Unknown",
           price: row.price ?? 0,
@@ -580,20 +611,35 @@ export async function fetchListingById(id: string): Promise<RegistryListing | nu
 export async function fetchShops(): Promise<RegistryShop[]> {
   if (!isSupabaseConfigured) return [];
 
-  const { data, error } = await supabase
-    .from("shops")
-    .select(SHOP_SELECT)
-    .order("name", { ascending: true })
-    .limit(100);
+  const [shopsResult, listingsResult] = await Promise.all([
+    supabase
+      .from("shops")
+      .select(SHOP_SELECT)
+      .order("name", { ascending: true })
+      .limit(100),
+    supabase
+      .from("listings")
+      .select(LISTING_SELECT)
+      .eq("status", "active")
+      .limit(200),
+  ]);
 
-  if (error) return [];
-  return ((data ?? []) as ShopRow[]).map(shopFromRow);
+  if (shopsResult.error) return [];
+
+  const listingCounts = activeListingCounts(
+    ((listingsResult.data ?? []) as ListingRow[]).filter(hasRealListingOwner),
+    "shop_id",
+  );
+  return ((shopsResult.data ?? []) as ShopRow[])
+    .map((shop) => ({ shop, listingCount: listingCounts.get(shop.id) ?? 0 }))
+    .filter(({ listingCount }) => listingCount > 0)
+    .map(({ shop, listingCount }) => shopFromRow(shop, listingCount));
 }
 
 export async function fetchBuilders(): Promise<RegistryShop[]> {
   if (!isSupabaseConfigured) return [];
 
-  const [profilesResult, shopsResult] = await Promise.all([
+  const [profilesResult, shopsResult, listingsResult] = await Promise.all([
     supabase
       .from("public_profiles")
       .select(PUBLIC_PROFILE_SELECT)
@@ -605,12 +651,30 @@ export async function fetchBuilders(): Promise<RegistryShop[]> {
       .select(SHOP_SELECT)
       .order("name", { ascending: true })
       .limit(100),
+    supabase
+      .from("listings")
+      .select(LISTING_SELECT)
+      .eq("status", "active")
+      .limit(200),
   ]);
 
+  const activeRows = ((listingsResult.data ?? []) as ListingRow[]).filter(
+    hasRealListingOwner,
+  );
+  const profileListingCounts = activeListingCounts(activeRows, "seller_id");
+  const shopListingCounts = activeListingCounts(activeRows, "shop_id");
   const profiles = ((profilesResult.data ?? []) as ProfileBuilderRow[])
     .filter(isDirectoryBuilderProfile)
-    .map(builderFromProfile);
-  const shops = ((shopsResult.data ?? []) as ShopRow[]).map(shopFromRow);
+    .map((profile) => ({
+      profile,
+      listingCount: profileListingCounts.get(profile.id) ?? 0,
+    }))
+    .filter(({ listingCount }) => listingCount > 0)
+    .map(({ profile, listingCount }) => builderFromProfile(profile, listingCount));
+  const shops = ((shopsResult.data ?? []) as ShopRow[])
+    .map((shop) => ({ shop, listingCount: shopListingCounts.get(shop.id) ?? 0 }))
+    .filter(({ listingCount }) => listingCount > 0)
+    .map(({ shop, listingCount }) => shopFromRow(shop, listingCount));
   const combinedProfiles = [...profiles, ...shops];
 
   if (profilesResult.error && shopsResult.error) return [];

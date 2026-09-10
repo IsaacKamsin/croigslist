@@ -19,24 +19,63 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 const PAYMENT_UNAVAILABLE_MESSAGE =
   "Payment is unavailable. Try again in a moment.";
 
+function getPaymentErrorMessage(error: unknown) {
+  const message =
+    error instanceof Error
+      ? error.message
+      : typeof error === "string"
+        ? error
+        : "";
+  const lowerMessage = message.toLowerCase();
+
+  if (!message) return PAYMENT_UNAVAILABLE_MESSAGE;
+
+  if (
+    lowerMessage.includes("publishable key") ||
+    lowerMessage.includes("stripeprovider") ||
+    lowerMessage.includes("not initialized")
+  ) {
+    return "Payment is not configured in this build. Install the latest build and try again.";
+  }
+
+  if (
+    lowerMessage.includes("missing stripe function secrets") ||
+    lowerMessage.includes("missing function secrets") ||
+    lowerMessage.includes("missing stripe")
+  ) {
+    return "Payment is not configured on the server yet.";
+  }
+
+  if (lowerMessage.includes("not authenticated")) {
+    return "Sign in again before starting membership.";
+  }
+
+  if (
+    lowerMessage.includes("network") ||
+    lowerMessage.includes("fetch") ||
+    lowerMessage.includes("non-2xx") ||
+    lowerMessage.includes("edge function")
+  ) {
+    return "Could not reach payment services. Check your connection and try again.";
+  }
+
+  if (
+    lowerMessage.includes("card") ||
+    lowerMessage.includes("payment method") ||
+    lowerMessage.includes("declined")
+  ) {
+    return "That payment method did not work. Try another card or payment method.";
+  }
+
+  if (lowerMessage.includes("stripe")) return PAYMENT_UNAVAILABLE_MESSAGE;
+
+  return message;
+}
+
 function wait(ms: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
-}
-
-function getVisibleError(message: string) {
-  const lowerMessage = message.toLowerCase();
-  if (
-    lowerMessage.includes("edge function") ||
-    lowerMessage.includes("non-2xx") ||
-    lowerMessage.includes("stripe") ||
-    lowerMessage.includes("supabase")
-  ) {
-    return PAYMENT_UNAVAILABLE_MESSAGE;
-  }
-
-  return message;
 }
 
 export function PaymentMembershipSheet() {
@@ -112,9 +151,7 @@ export function PaymentMembershipSheet() {
         checkoutError instanceof Error ? checkoutError.message : checkoutError,
       );
       setError(
-        checkoutError instanceof Error
-          ? checkoutError.message
-          : PAYMENT_UNAVAILABLE_MESSAGE,
+        getPaymentErrorMessage(checkoutError),
       );
     } finally {
       setIsOpening(false);
@@ -129,9 +166,7 @@ export function PaymentMembershipSheet() {
       await refreshMemberProfile();
     } catch (refreshError) {
       setError(
-        refreshError instanceof Error
-          ? refreshError.message
-          : "Could not refresh payment status.",
+        getPaymentErrorMessage(refreshError),
       );
     } finally {
       setIsRefreshing(false);
@@ -190,7 +225,7 @@ export function PaymentMembershipSheet() {
 
         {error ? (
           <View style={styles.errorNotice}>
-            <Text style={styles.error}>{getVisibleError(error)}</Text>
+            <Text style={styles.error}>{error}</Text>
           </View>
         ) : null}
 

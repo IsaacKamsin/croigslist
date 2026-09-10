@@ -108,14 +108,14 @@ function textOrNull(value: unknown) {
 }
 
 function getEffectiveMemberStatus(profile: ProfileRow | null): MemberStatus {
-  if (!profile) return "none";
+  if (!profile) return "pending_payment";
   const status = profile?.member_status ?? "pending_payment";
   const subscriptionStatus = profile?.subscription_status;
 
   if (status === "rejected") return "rejected";
   if (subscriptionStatus === "active") return "approved";
   if (subscriptionStatus === "trialing" && status === "approved") return "approved";
-  if (status === "approved") return "pending_payment";
+  if (status === "approved") return "approved";
   return status;
 }
 

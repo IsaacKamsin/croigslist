@@ -113,7 +113,6 @@ as $$
     from public.profiles p
     where p.id = user_id_input
       and p.member_status = 'approved'
-      and coalesce(p.subscription_status, '') in ('active', 'trialing')
   );
 $$;
 

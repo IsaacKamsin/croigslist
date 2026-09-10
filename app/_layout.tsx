@@ -8,6 +8,7 @@ import {
 } from "expo-router";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
+import { Keyboard, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { StripeProvider } from "@stripe/stripe-react-native";
@@ -39,24 +40,11 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     const inAuthGroup = segments[0] === "(auth)";
     const inAuthCallback = segments[0] === "auth" && segments[1] === "callback";
     const inPayment = segments[0] === "payment";
-    const inProfileTab = segments[0] === "(tabs)" && segments[1] === "profile";
 
     if (!isAuthenticated && !inAuthGroup && !inAuthCallback) {
       router.replace("/(auth)/welcome");
-    } else if (
-      isAuthenticated &&
-      memberStatus === "none" &&
-      !inAuthGroup &&
-      !inAuthCallback
-    ) {
+    } else if (isAuthenticated && memberStatus === "rejected" && !inAuthGroup) {
       router.replace("/(auth)/welcome");
-    } else if (
-      isAuthenticated &&
-      memberStatus !== "approved" &&
-      !inPayment &&
-      !inProfileTab
-    ) {
-      router.replace("/payment");
     } else if (isAuthenticated && memberStatus === "approved" && inPayment) {
       router.replace(returnTo?.startsWith("/") ? (returnTo as never) : "/(tabs)");
     } else if (isAuthenticated && inAuthGroup) {
@@ -152,95 +140,103 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <StripeProvider
-        publishableKey={stripePublishableKey}
-        urlScheme="croigslist"
+      <View
+        style={{ flex: 1 }}
+        onStartShouldSetResponderCapture={() => {
+          Keyboard.dismiss();
+          return false;
+        }}
       >
-        <PaperProvider theme={paperTheme}>
-          <QueryClientProvider client={queryClient}>
-            <BottomSheetModalProvider>
-              <AuthProvider>
-                <AuthGate>
-              <Stack
-                screenOptions={{
-                  headerShown: false,
-                  contentStyle: { backgroundColor: COLORS.bg },
-                  animation: "slide_from_right",
-                  animationDuration: 160,
-                }}
-              >
-                <Stack.Screen name="(auth)" />
-                <Stack.Screen name="auth/callback" />
-                <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-                <Stack.Screen name="payment" />
-
-                <Stack.Screen
-                  name="listing/[id]"
-                  options={{
+        <StripeProvider
+          publishableKey={stripePublishableKey}
+          urlScheme="croigslist"
+        >
+          <PaperProvider theme={paperTheme}>
+            <QueryClientProvider client={queryClient}>
+              <BottomSheetModalProvider>
+                <AuthProvider>
+                  <AuthGate>
+                <Stack
+                  screenOptions={{
                     headerShown: false,
+                    contentStyle: { backgroundColor: COLORS.bg },
                     animation: "slide_from_right",
+                    animationDuration: 160,
                   }}
-                />
+                >
+                  <Stack.Screen name="(auth)" />
+                  <Stack.Screen name="auth/callback" />
+                  <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                  <Stack.Screen name="payment" />
 
-                <Stack.Screen
-                  name="listing/create"
-                  options={{
-                    presentation: "modal",
-                    headerShown: true,
-                    headerTitle: "",
-                    headerBackTitle: "",
-                    headerStyle: { backgroundColor: COLORS.bg },
-                    headerTintColor: COLORS.black,
-                    headerShadowVisible: false,
-                  }}
-                />
+                  <Stack.Screen
+                    name="listing/[id]"
+                    options={{
+                      headerShown: false,
+                      animation: "slide_from_right",
+                    }}
+                  />
 
-                <Stack.Screen
-                  name="builder/[id]"
-                  options={{
-                    headerShown: true,
-                    headerTitle: "",
-                    headerBackTitle: "",
-                    headerStyle: { backgroundColor: COLORS.bg },
-                    headerTintColor: COLORS.black,
-                    headerShadowVisible: false,
-                    animation: "slide_from_right",
-                  }}
-                />
+                  <Stack.Screen
+                    name="listing/create"
+                    options={{
+                      presentation: "modal",
+                      headerShown: true,
+                      headerTitle: "",
+                      headerBackTitle: "",
+                      headerStyle: { backgroundColor: COLORS.bg },
+                      headerTintColor: COLORS.black,
+                      headerShadowVisible: false,
+                    }}
+                  />
 
-                <Stack.Screen
-                  name="garage/details"
-                  options={{
-                    headerShown: true,
-                    headerTitle: "",
-                    headerBackTitle: "",
-                    headerStyle: { backgroundColor: COLORS.bg },
-                    headerTintColor: COLORS.black,
-                    headerShadowVisible: false,
-                    animation: "slide_from_right",
-                  }}
-                />
+                  <Stack.Screen
+                    name="builder/[id]"
+                    options={{
+                      headerShown: true,
+                      headerTitle: "",
+                      headerBackTitle: "",
+                      headerStyle: { backgroundColor: COLORS.bg },
+                      headerTintColor: COLORS.black,
+                      headerShadowVisible: false,
+                      animation: "slide_from_right",
+                    }}
+                  />
 
-                <Stack.Screen
-                  name="shop/[slug]"
-                  options={{
-                    headerShown: true,
-                    headerTitle: "",
-                    headerBackTitle: "",
-                    headerStyle: { backgroundColor: COLORS.bg },
-                    headerTintColor: COLORS.black,
-                    headerShadowVisible: false,
-                    animation: "slide_from_right",
-                  }}
-                />
-              </Stack>
-                </AuthGate>
-                <StatusBar style="dark" />
-              </AuthProvider>
-            </BottomSheetModalProvider>
-          </QueryClientProvider>
-        </PaperProvider>
-      </StripeProvider>
+                  <Stack.Screen
+                    name="garage/details"
+                    options={{
+                      headerShown: true,
+                      headerTitle: "",
+                      headerBackTitle: "",
+                      headerStyle: { backgroundColor: COLORS.bg },
+                      headerTintColor: COLORS.black,
+                      headerShadowVisible: false,
+                      animation: "slide_from_right",
+                    }}
+                  />
+
+                  <Stack.Screen
+                    name="shop/[slug]"
+                    options={{
+                      headerShown: true,
+                      headerTitle: "",
+                      headerBackTitle: "",
+                      headerStyle: { backgroundColor: COLORS.bg },
+                      headerTintColor: COLORS.black,
+                      headerShadowVisible: false,
+                      animation: "slide_from_right",
+                    }}
+                  />
+                </Stack>
+                  </AuthGate>
+                  <StatusBar style="dark" />
+                </AuthProvider>
+              </BottomSheetModalProvider>
+            </QueryClientProvider>
+          </PaperProvider>
+        </StripeProvider>
+      </View>
     </GestureHandlerRootView>
   );
 }

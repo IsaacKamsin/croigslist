@@ -1,5 +1,6 @@
 import { COLORS, F, SPACING, TYPE } from "@/constants/design";
 import { useAuth } from "@/context/AuthContext";
+import { getCallbackErrorMessage } from "@/lib/auth-error-messages";
 import { supabase } from "@/lib/supabase";
 import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
@@ -39,6 +40,9 @@ export default function AuthCallbackScreen() {
       }
 
       const params = paramsFromUrl(url);
+      const urlError = params.get("error_description") ?? params.get("error");
+      if (urlError) throw new Error(urlError);
+
       const code = params.get("code");
       const accessToken = params.get("access_token");
       const refreshToken = params.get("refresh_token");
@@ -53,6 +57,8 @@ export default function AuthCallbackScreen() {
           refresh_token: refreshToken,
         });
         if (sessionError) throw sessionError;
+      } else {
+        throw new Error("This verification link is missing sign-in details.");
       }
 
       await refreshMemberProfile();
@@ -62,9 +68,7 @@ export default function AuthCallbackScreen() {
     completeAuth().catch((callbackError) => {
       if (cancelled) return;
       setError(
-        callbackError instanceof Error
-          ? callbackError.message
-          : "Could not verify your email.",
+        getCallbackErrorMessage(callbackError),
       );
     });
 
