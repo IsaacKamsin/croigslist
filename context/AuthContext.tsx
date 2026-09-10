@@ -28,7 +28,6 @@ interface AccountApplication {
   city?: string;
   type: MemberType;
   bio?: string;
-  inviteCode: string;
 }
 
 type ApplyResult =
@@ -224,21 +223,6 @@ async function upsertProfile(user: User, application: AccountApplication) {
   if (error) throw error;
 }
 
-async function validateInvite(application: AccountApplication) {
-  const { data, error } = await supabase.rpc("is_invite_valid", {
-    invite_code_input: application.inviteCode.trim(),
-    email_input: application.email.trim(),
-    role_input: application.type,
-  });
-
-  if (error) {
-    throw new Error("Could not verify this invite. Try again.");
-  }
-  if (!data) {
-    throw new Error("This invite is invalid, expired, or already used.");
-  }
-}
-
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AuthState>({
     isAuthenticated: false,
@@ -361,7 +345,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async (application: AccountApplication) => {
       assertSupabaseConfigured();
       const email = application.email.trim();
-      await validateInvite(application);
       const { data, error } = await supabase.auth.signUp({
         email,
         password: application.password,
@@ -374,7 +357,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             city: application.city?.trim() || "",
             type: application.type,
             bio: application.bio?.trim() || null,
-            invite_code: application.inviteCode.trim(),
           },
         },
       });

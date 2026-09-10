@@ -12,7 +12,6 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 const applySchema = z.object({
-  inviteCode: z.string().trim().min(4, 'Enter your invite code.'),
   email: z.string().trim().email('Enter a valid email address.'),
   password: z.string().min(6, 'Password must be at least 6 characters.'),
   type: z.enum(['buyer', 'builder']),
@@ -47,7 +46,7 @@ export default function ApplyScreen() {
     formState: { errors, isSubmitting },
   } = useForm<ApplyForm>({
     resolver: zodResolver(applySchema),
-    defaultValues: { inviteCode: '', email: '', password: '', type: 'buyer' },
+    defaultValues: { email: '', password: '', type: 'buyer' },
   });
 
   const type = watch('type');
@@ -147,25 +146,6 @@ export default function ApplyScreen() {
               ))}
             </View>
             <View style={styles.field}>
-              <Text style={styles.label}>INVITE CODE</Text>
-              <Controller
-                control={control}
-                name="inviteCode"
-                render={({ field: { onChange, onBlur, value } }) => (
-                  <TextInput
-                    style={styles.input}
-                    value={value}
-                    onChangeText={(next) => onChange(next.trimStart())}
-                    onBlur={onBlur}
-                    placeholder="Enter code"
-                    placeholderTextColor={COLORS.textFaint}
-                    autoCapitalize="characters"
-                  />
-                )}
-              />
-            </View>
-
-            <View style={styles.field}>
               <Text style={styles.label}>EMAIL</Text>
               <Controller
                 control={control}
@@ -205,7 +185,6 @@ export default function ApplyScreen() {
             </View>
           </View>
 
-          {errors.inviteCode?.message && <Text style={styles.error}>{errors.inviteCode.message}</Text>}
           {errors.email?.message && <Text style={styles.error}>{errors.email.message}</Text>}
           {errors.password?.message && <Text style={styles.error}>{errors.password.message}</Text>}
           {errors.root?.message && <Text style={styles.error}>{errors.root.message}</Text>}

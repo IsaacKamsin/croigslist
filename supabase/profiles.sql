@@ -274,10 +274,7 @@ drop policy if exists "Users can insert their own profile" on public.profiles;
 create policy "Users can insert their own profile"
 on public.profiles for insert
 to authenticated
-with check (
-  auth.uid() = id
-  and public.user_has_invite_access(auth.uid())
-);
+with check (auth.uid() = id);
 
 drop policy if exists "Users can update their own profile" on public.profiles;
 create policy "Users can update their own profile"
@@ -324,13 +321,6 @@ begin
   profile_handle := regexp_replace(lower(coalesce(nullif(profile_name, ''), split_part(new.email, '@', 1))), '[^a-z0-9]+', '-', 'g');
   profile_handle := trim(both '-' from profile_handle);
   profile_role := coalesce(new.raw_user_meta_data->>'type', 'buyer');
-
-  perform public.consume_invite_for_user(
-    new.id,
-    new.email,
-    new.raw_user_meta_data->>'invite_code',
-    case when profile_role = 'builder' then 'builder' else 'buyer' end
-  );
 
   insert into public.profiles (
     id,
