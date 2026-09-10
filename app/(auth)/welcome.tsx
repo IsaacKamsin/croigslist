@@ -2,6 +2,7 @@ import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { Image } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
+import { useState } from "react";
 import { Dimensions, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -13,6 +14,8 @@ const HERO_IMAGE = require("../../assets/images/login/IMG_5142-hero.jpg");
 export default function WelcomeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const [cardHeight, setCardHeight] = useState(0);
+  const cardBottom = insets.bottom + 16;
 
   return (
     <View style={styles.container}>
@@ -30,17 +33,25 @@ export default function WelcomeScreen() {
         style={styles.gradient}
       />
 
-      <View style={[styles.bottom, { paddingBottom: insets.bottom + 16 }]}>
-        <View style={styles.card}>
-          <Text style={styles.title}>Start selling{"\n"}on Croigslist</Text>
+      {cardHeight > 0 ? (
+        <View style={[styles.riderTag, { bottom: cardBottom + cardHeight + 10 }]}>
+          <Text style={styles.riderText}>@brokendrapper  ·  Duluth, MN</Text>
+        </View>
+      ) : null}
+
+      <View style={[styles.bottom, { paddingBottom: cardBottom }]}>
+        <View
+          style={styles.card}
+          onLayout={(event) => setCardHeight(event.nativeEvent.layout.height)}
+        >
+          <Text style={styles.title}>Start selling on Croigslist</Text>
           <Text style={styles.subtitle}>
-            Sell builds, parts, and projects from your garage.
-          </Text>
-          <Text style={styles.subtitle}>
-            Free to list. Add a few details and publish when ready.
+            List bikes and builds from your garage. Membership is
+            free for 3 days, then $100/year.
           </Text>
           <Text style={styles.terms}>
-            By continuing you agree to the Croigslist terms.
+            By continuing you agree to the Croigslist terms and annual billing
+            after your trial.
           </Text>
           <Pressable
             style={styles.primaryButton}
@@ -65,6 +76,21 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: COLORS.black },
   bgMedia: { ...StyleSheet.absoluteFillObject, width, height },
   gradient: { ...StyleSheet.absoluteFillObject },
+  riderTag: {
+    position: "absolute",
+    left: SPACING.page,
+    zIndex: 2,
+    backgroundColor: "rgba(36,36,36,0.34)",
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  riderText: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontFamily: F.mono,
+    color: COLORS.whiteA70,
+    letterSpacing: 0.8,
+  },
   bottom: {
     position: "absolute",
     bottom: 0,
@@ -74,48 +100,48 @@ const styles = StyleSheet.create({
   },
   card: {
     backgroundColor: COLORS.white,
-    borderRadius: 14,
-    paddingHorizontal: 30,
-    paddingTop: 30,
-    paddingBottom: 24,
+    borderRadius: 10,
+    paddingHorizontal: 24,
+    paddingTop: 24,
+    paddingBottom: 18,
   },
   title: {
-    fontSize: 38,
+    fontSize: 29,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
     letterSpacing: 0,
-    lineHeight: 41,
+    lineHeight: 32,
   },
   subtitle: {
-    fontSize: 17,
+    fontSize: 16,
     fontFamily: F.regular,
     color: COLORS.textSecondary,
-    lineHeight: 24,
-    marginTop: 18,
+    lineHeight: 22,
+    marginTop: 12,
   },
   terms: {
-    fontSize: 13,
-    lineHeight: 17,
+    fontSize: 11,
+    lineHeight: 15,
     fontFamily: F.regular,
     color: COLORS.textSecondary,
     textAlign: "center",
-    marginTop: 24,
-    marginBottom: 14,
+    marginTop: 18,
+    marginBottom: 10,
   },
   primaryButton: {
     backgroundColor: COLORS.black,
-    borderRadius: 32,
-    minHeight: 56,
+    borderRadius: 26,
+    minHeight: 50,
     justifyContent: "center",
     alignItems: "center",
   },
-  primaryButtonText: { fontSize: 16, fontFamily: F.bold, color: COLORS.white },
+  primaryButtonText: { fontSize: 15, fontFamily: F.bold, color: COLORS.white },
   secondaryButton: {
     alignItems: "center",
-    paddingTop: 22,
+    paddingTop: 18,
   },
   secondaryButtonText: {
-    fontSize: 16,
+    fontSize: 15,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
   },

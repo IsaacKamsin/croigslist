@@ -58,7 +58,7 @@ export default function ShopScreen() {
   if (isPending) {
     return (
       <View style={styles.container}>
-        <StatusState eyebrow="Loading" title="Opening shop" />
+        <StatusState eyebrow="Loading" title="Opening builder" />
       </View>
     );
   }
@@ -68,8 +68,8 @@ export default function ShopScreen() {
       <View style={styles.container}>
         <StatusState
           eyebrow="Not found"
-          title="Shop unavailable"
-          body="This shop may have been removed or the link is no longer valid."
+          title="Builder unavailable"
+          body="This builder may have been removed or the link is no longer valid."
           actionLabel="GO BACK"
           onAction={() => backOrReplace(router, "/(tabs)")}
         />
@@ -90,7 +90,7 @@ export default function ShopScreen() {
       >
         {/* ── HERO ── */}
         <View style={styles.hero}>
-          <Text style={styles.heroTopline}>CROIGSLIST VERIFIED SHOP</Text>
+          <Text style={styles.heroTopline}>CROIGSLIST VERIFIED SELLER</Text>
           <Text style={styles.heroName}>{shop.name}</Text>
           <Text style={styles.heroTagline}>{shop.tagline}</Text>
 
@@ -98,7 +98,7 @@ export default function ShopScreen() {
             {shop.verified && (
               <View style={[styles.badge, styles.badgeFilled]}>
                 <Text style={[styles.badgeText, styles.badgeTextFilled]}>
-                  ✓ VERIFIED BUILDER
+                  ✓ VERIFIED SELLER
                 </Text>
               </View>
             )}
@@ -159,8 +159,11 @@ export default function ShopScreen() {
             <View style={styles.emptyBuilds}>
               <Text style={styles.emptyBuildsTitle}>No listings yet</Text>
               <Text style={styles.emptyBuildsBody}>
-                Message the shop or check back when inventory is live.
+                Message the seller or check back when inventory is live.
               </Text>
+              <Pressable style={styles.emptyBuildsButton} onPress={handleMessage}>
+                <Text style={styles.emptyBuildsButtonText}>Message seller</Text>
+              </Pressable>
             </View>
           ) : (
             <FlatList
@@ -175,13 +178,19 @@ export default function ShopScreen() {
                   onPress={() => goListing(item.id)}
                 >
                   <View style={styles.buildImgWrap}>
-                    <Image
-                      source={{ uri: item.image }}
-                      style={styles.buildImg}
-                      contentFit="cover"
-                      cachePolicy={IMAGE_CACHE}
-                      recyclingKey={item.image}
-                    />
+                    {item.image ? (
+                      <Image
+                        source={{ uri: item.image }}
+                        style={styles.buildImg}
+                        contentFit="cover"
+                        cachePolicy={IMAGE_CACHE}
+                        recyclingKey={item.image}
+                      />
+                    ) : (
+                      <View style={styles.buildImageFallback}>
+                        <Text style={styles.buildImageFallbackText}>NO PHOTO</Text>
+                      </View>
+                    )}
                   </View>
                   <Text style={styles.buildMeta}>
                     {item.year} · {item.make}
@@ -396,6 +405,18 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: SPACING.sm,
   },
+  emptyBuildsButton: {
+    alignSelf: "flex-start",
+    backgroundColor: COLORS.black,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    marginTop: SPACING.md,
+  },
+  emptyBuildsButtonText: {
+    fontSize: 14,
+    fontFamily: F.bold,
+    color: COLORS.white,
+  },
   buildCard: {
     width: CARD_W,
   },
@@ -406,6 +427,18 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   buildImg: S.cardImage,
+  buildImageFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+  },
+  buildImageFallbackText: {
+    fontSize: 9,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.2,
+    color: COLORS.textFaint,
+  },
   buildMeta: {
     fontSize: 9,
     fontFamily: F.mono,

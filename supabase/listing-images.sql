@@ -24,8 +24,15 @@ with check (
   and auth.uid()::text = (storage.foldername(name))[1]
 );
 
+-- World-readable SELECT also made the bucket world-LISTABLE, which enumerated
+-- user ids and every uploaded file. Public buckets still serve
+-- /object/public/<path> without consulting RLS, so images keep loading.
 drop policy if exists "Listing images are publicly readable" on storage.objects;
-create policy "Listing images are publicly readable"
+drop policy if exists "Owners can list their listing-images" on storage.objects;
+create policy "Owners can list their listing-images"
 on storage.objects for select
-to public
-using (bucket_id = 'listing-images');
+to authenticated
+using (
+  bucket_id = 'listing-images'
+  and auth.uid()::text = (storage.foldername(name))[1]
+);

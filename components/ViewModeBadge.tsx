@@ -65,7 +65,7 @@ export function ViewModeBadge() {
           >
             <View>
               <Text style={s.optionTitle}>Buy</Text>
-              <Text style={s.optionBody}>Browse listings, save bikes, and message builders.</Text>
+              <Text style={s.optionBody}>Browse listings, save bikes, and message sellers.</Text>
             </View>
             <Text style={s.optionStatus}>{!isBuilder ? "ACTIVE" : ""}</Text>
           </Pressable>

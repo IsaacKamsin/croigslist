@@ -1,15 +1,16 @@
 import { useFonts } from "expo-font";
 import {
   Stack,
+  useGlobalSearchParams,
   useRootNavigationState,
   useRouter,
   useSegments,
 } from "expo-router";
-import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect, useState } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
+import { StripeProvider } from "@stripe/stripe-react-native";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   MD3LightTheme,
@@ -20,11 +21,10 @@ import {
 import { COLORS, FONTS } from "@/constants/design";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
-SplashScreen.preventAutoHideAsync();
-
 function AuthGate({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, memberStatus } = useAuth();
   const segments = useSegments();
+  const { returnTo } = useGlobalSearchParams<{ returnTo?: string }>();
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
   const [isReady, setIsReady] = useState(false);
@@ -37,16 +37,37 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     if (!isReady || isLoading || !rootNavigationState?.key) return;
 
     const inAuthGroup = segments[0] === "(auth)";
+    const inAuthCallback = segments[0] === "auth" && segments[1] === "callback";
+    const inPayment = segments[0] === "payment";
+    const inProfileTab = segments[0] === "(tabs)" && segments[1] === "profile";
 
-    if (!isAuthenticated && !inAuthGroup) {
+    if (!isAuthenticated && !inAuthGroup && !inAuthCallback) {
       router.replace("/(auth)/welcome");
+    } else if (
+      isAuthenticated &&
+      memberStatus === "none" &&
+      !inAuthGroup &&
+      !inAuthCallback
+    ) {
+      router.replace("/(auth)/welcome");
+    } else if (
+      isAuthenticated &&
+      memberStatus !== "approved" &&
+      !inPayment &&
+      !inProfileTab
+    ) {
+      router.replace("/payment");
+    } else if (isAuthenticated && memberStatus === "approved" && inPayment) {
+      router.replace(returnTo?.startsWith("/") ? (returnTo as never) : "/(tabs)");
     } else if (isAuthenticated && inAuthGroup) {
       router.replace("/(tabs)");
     }
   }, [
     isAuthenticated,
     isLoading,
+    memberStatus,
     rootNavigationState?.key,
+    returnTo,
     segments,
     isReady,
     router,
@@ -94,6 +115,8 @@ const paperTheme = {
   fonts: configureFonts({ config: fontConfig }),
 };
 
+const stripePublishableKey = process.env.EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? "";
+
 export default function RootLayout() {
   const [queryClient] = useState(
     () =>
@@ -125,21 +148,19 @@ export default function RootLayout() {
     "SpaceGrotesk-Light": require("../assets/fonts/SpaceGrotesk-Light.ttf"),
   });
 
-  useEffect(() => {
-    if (fontsLoaded) {
-      SplashScreen.hideAsync();
-    }
-  }, [fontsLoaded]);
-
   if (!fontsLoaded) return null;
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <PaperProvider theme={paperTheme}>
-        <QueryClientProvider client={queryClient}>
-          <BottomSheetModalProvider>
-            <AuthProvider>
-              <AuthGate>
+      <StripeProvider
+        publishableKey={stripePublishableKey}
+        urlScheme="croigslist"
+      >
+        <PaperProvider theme={paperTheme}>
+          <QueryClientProvider client={queryClient}>
+            <BottomSheetModalProvider>
+              <AuthProvider>
+                <AuthGate>
               <Stack
                 screenOptions={{
                   headerShown: false,
@@ -149,19 +170,15 @@ export default function RootLayout() {
                 }}
               >
                 <Stack.Screen name="(auth)" />
+                <Stack.Screen name="auth/callback" />
                 <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+                <Stack.Screen name="payment" />
 
                 <Stack.Screen
                   name="listing/[id]"
                   options={{
-                    headerShown: true,
-                    headerTitle: "",
-                    headerBackTitle: "Back",
-                    headerStyle: { backgroundColor: COLORS.bg },
-                    headerTintColor: COLORS.black,
-                    headerShadowVisible: false,
-                    animation: "fade",
-                    animationDuration: 250,
+                    headerShown: false,
+                    animation: "slide_from_right",
                   }}
                 />
 
@@ -171,6 +188,7 @@ export default function RootLayout() {
                     presentation: "modal",
                     headerShown: true,
                     headerTitle: "",
+                    headerBackTitle: "",
                     headerStyle: { backgroundColor: COLORS.bg },
                     headerTintColor: COLORS.black,
                     headerShadowVisible: false,
@@ -182,7 +200,7 @@ export default function RootLayout() {
                   options={{
                     headerShown: true,
                     headerTitle: "",
-                    headerBackTitle: "Back",
+                    headerBackTitle: "",
                     headerStyle: { backgroundColor: COLORS.bg },
                     headerTintColor: COLORS.black,
                     headerShadowVisible: false,
@@ -195,7 +213,7 @@ export default function RootLayout() {
                   options={{
                     headerShown: true,
                     headerTitle: "",
-                    headerBackTitle: "Back",
+                    headerBackTitle: "",
                     headerStyle: { backgroundColor: COLORS.bg },
                     headerTintColor: COLORS.black,
                     headerShadowVisible: false,
@@ -208,7 +226,7 @@ export default function RootLayout() {
                   options={{
                     headerShown: true,
                     headerTitle: "",
-                    headerBackTitle: "Back",
+                    headerBackTitle: "",
                     headerStyle: { backgroundColor: COLORS.bg },
                     headerTintColor: COLORS.black,
                     headerShadowVisible: false,
@@ -216,12 +234,13 @@ export default function RootLayout() {
                   }}
                 />
               </Stack>
-              </AuthGate>
-              <StatusBar style="dark" />
-            </AuthProvider>
-          </BottomSheetModalProvider>
-        </QueryClientProvider>
-      </PaperProvider>
+                </AuthGate>
+                <StatusBar style="dark" />
+              </AuthProvider>
+            </BottomSheetModalProvider>
+          </QueryClientProvider>
+        </PaperProvider>
+      </StripeProvider>
     </GestureHandlerRootView>
   );
 }

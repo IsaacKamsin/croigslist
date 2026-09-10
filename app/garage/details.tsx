@@ -8,8 +8,10 @@ import {
 import { backOrReplace } from "@/lib/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Image } from "expo-image";
+import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import {
   Alert,
@@ -24,6 +26,7 @@ import { z } from "zod";
 
 const garageDetailsSchema = z.object({
   garageName: z.string().trim().optional(),
+  garageImageUrl: z.string().trim().optional(),
   contactEmail: z
     .string()
     .trim()
@@ -83,6 +86,7 @@ export default function GarageDetailsScreen() {
     resolver: zodResolver(garageDetailsSchema),
     defaultValues: {
       garageName: "",
+      garageImageUrl: "",
       contactEmail: "",
       phone: "",
       website: "",
@@ -94,14 +98,51 @@ export default function GarageDetailsScreen() {
     queryKey: ["garage-details"],
     queryFn: fetchGarageDetails,
   });
+  const [garageImage, setGarageImage] = useState<{
+    uri: string;
+    base64?: string;
+    mimeType?: string;
+  } | null>(null);
 
   useEffect(() => {
     if (savedDetails) reset(savedDetails);
   }, [reset, savedDetails]);
 
+  const pickGarageImage = async () => {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Photo access needed", "Allow photo access to add a garage image.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.85,
+      base64: true,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
+    });
+
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    setGarageImage({
+      uri: asset.uri,
+      base64: asset.base64 ?? undefined,
+      mimeType: asset.base64 ? "image/jpeg" : asset.mimeType ?? undefined,
+    });
+  };
+
   const save = async (details: GarageDetailsForm) => {
     try {
-      await updateGarageDetails(details as GarageDetails);
+      await updateGarageDetails(details as GarageDetails, garageImage ? {
+        uri: garageImage.uri,
+        data: {
+          base64: garageImage.base64,
+          mimeType: garageImage.mimeType,
+        },
+      } : undefined);
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["shops-tab"] }),
         queryClient.invalidateQueries({ queryKey: ["home"] }),
@@ -124,11 +165,23 @@ export default function GarageDetailsScreen() {
       showsVerticalScrollIndicator={false}
     >
       <Text style={styles.kicker}>SELLER PROFILE</Text>
-      <Text style={styles.title}>Garage Details</Text>
+      <Text style={styles.title}>Seller Profile</Text>
       <Text style={styles.body}>
         This is the public name and contact information buyers see when they
         view your garage.
       </Text>
+
+      <Pressable style={styles.imagePicker} onPress={pickGarageImage}>
+        {garageImage?.uri || savedDetails?.garageImageUrl ? (
+          <Image
+            source={{ uri: garageImage?.uri ?? savedDetails?.garageImageUrl }}
+            style={styles.garageImage}
+            contentFit="cover"
+          />
+        ) : (
+          <Text style={styles.imagePickerText}>Add garage image</Text>
+        )}
+      </Pressable>
 
       <Controller
         control={control}
@@ -242,6 +295,29 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: SPACING.sm,
     marginBottom: SPACING.xl,
+  },
+  imagePicker: {
+    width: 92,
+    height: 92,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.gray300,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
+    marginBottom: SPACING.xl,
+    backgroundColor: COLORS.gray100,
+  },
+  garageImage: {
+    width: "100%",
+    height: "100%",
+  },
+  imagePickerText: {
+    fontSize: 12,
+    fontFamily: F.semibold,
+    color: COLORS.textPrimary,
+    textAlign: "center",
+    paddingHorizontal: 8,
   },
   field: {
     marginBottom: SPACING.lg,

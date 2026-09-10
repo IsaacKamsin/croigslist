@@ -1,14 +1,18 @@
-import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING, TYPE } from "@/constants/design";
+import { COLORS, F, IMAGE_CACHE, SPACING, TYPE } from "@/constants/design";
 import { hapticLight } from "@/hooks/useHaptics";
 import { S } from "@/constants/styles";
-import { fetchListings, type RegistryListing } from "@/lib/registry-db";
+import {
+  fetchBuilders,
+  fetchListings,
+  type RegistryListing,
+  type RegistryShop,
+} from "@/lib/registry-db";
 import { formatUsd } from "@/lib/formatters";
 import { Image } from "expo-image";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
-  Dimensions,
   LayoutAnimation,
   Platform,
   Pressable,
@@ -17,6 +21,7 @@ import {
   Text,
   TextInput,
   UIManager,
+  useWindowDimensions,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -25,45 +30,35 @@ if (Platform.OS === "android" && UIManager.setLayoutAnimationEnabledExperimental
   UIManager.setLayoutAnimationEnabledExperimental(true);
 }
 
-const SCREEN_W = Dimensions.get("window").width;
 const MASONRY_GAP = 12;
-const COL_W = (SCREEN_W - SPACING.page * 2 - MASONRY_GAP) / 2;
 
 // ── Trending / recent searches ─────────────────────────────────────
-const TRENDING = ["CB750", "SR400", "R NineT", "Bonneville", "CX500", "KZ650"];
+const TRENDING = ["CAFE RACER", "PROJECT", "UNDER $5K", "MINNEAPOLIS", "BUILDERS", "RIDEABLE"];
 
 // ── City filter ────────────────────────────────────────────────────
 const CITIES = ["ALL", "MINNEAPOLIS", "ST. PAUL", "DULUTH", "ROCHESTER"] as const;
 type CityFilter = (typeof CITIES)[number];
 
-// Mock city assignment based on listing id hash
-function getCity(id: string): string {
-  const cities = ["Minneapolis", "St. Paul", "Duluth", "Rochester"];
-  let hash = 0;
-  for (let i = 0; i < id.length; i++) hash = hash * 31 + id.charCodeAt(i);
-  return cities[Math.abs(hash) % cities.length];
-}
-
 // ── Tag style helper ───────────────────────────────────────────────
 function getTagStyles(tag: string) {
   switch (tag) {
     case "RIDEABLE":
-      return { bg: { backgroundColor: COLORS.accent, paddingHorizontal: 6, paddingVertical: 2 } as const, light: false };
+      return { bg: { backgroundColor: COLORS.gray100, paddingHorizontal: 8, paddingVertical: 4 } as const, tone: "default" as const };
     case "PROJECT":
-      return { bg: { backgroundColor: COLORS.black, paddingHorizontal: 6, paddingVertical: 2 } as const, light: true };
+      return { bg: { backgroundColor: COLORS.black, paddingHorizontal: 8, paddingVertical: 4 } as const, tone: "light" as const };
     case "RARE":
-      return { bg: { backgroundColor: COLORS.accentAlt, paddingHorizontal: 6, paddingVertical: 2 } as const, light: true };
+      return { bg: { backgroundColor: COLORS.accentAlt, paddingHorizontal: 8, paddingVertical: 4 } as const, tone: "light" as const };
     default:
-      return { bg: { backgroundColor: COLORS.surface, paddingHorizontal: 6, paddingVertical: 2 } as const, light: false };
+      return { bg: { backgroundColor: COLORS.surfaceRaised, paddingHorizontal: 8, paddingVertical: 4 } as const, tone: "default" as const };
   }
 }
 
 // ── Masonry height from id ─────────────────────────────────────────
 const HEIGHT_RATIOS = [1.4, 1.1, 0.85, 1.25, 1.0, 1.35] as const;
-function cardImageHeight(id: string): number {
+function cardImageHeight(id: string, colWidth: number): number {
   let hash = 0;
   for (let i = 0; i < id.length; i++) hash = hash * 31 + id.charCodeAt(i);
-  return COL_W * HEIGHT_RATIOS[Math.abs(hash) % HEIGHT_RATIOS.length];
+  return colWidth * HEIGHT_RATIOS[Math.abs(hash) % HEIGHT_RATIOS.length];
 }
 
 // ── Filters (only shown after search) ──────────────────────────────
@@ -82,9 +77,34 @@ type TaggedListing = {
   price: number;
   image: string;
   viewers: number;
+  sellerId?: string;
   city?: string;
+  mileage?: string;
+  sellerName?: string;
+  description?: string;
+  createdAt?: string;
   tags: string[];
 };
+
+type TaggedBuilder = {
+  id: string;
+  slug: string;
+  kind?: "shop" | "profile";
+  name: string;
+  specialty: string;
+  image: string;
+  location?: string;
+  builds: number;
+  matchingBikeCount?: number;
+};
+
+type SearchData = {
+  bikes: TaggedListing[];
+  builders: TaggedBuilder[];
+};
+
+const EMPTY_BIKES: TaggedListing[] = [];
+const EMPTY_BUILDERS: TaggedBuilder[] = [];
 
 function tagListings(items: RegistryListing[]): TaggedListing[] {
   return items
@@ -103,17 +123,59 @@ function tagListings(items: RegistryListing[]): TaggedListing[] {
         price: item.price,
         image: item.image,
         viewers: item.viewers,
+        sellerId: item.sellerId,
         city: item.city,
+        mileage: item.mileage,
+        sellerName: item.sellerName,
+        description: item.description,
+        createdAt: item.createdAt,
         tags,
       };
     });
+}
+
+function tagBuilders(items: RegistryShop[]): TaggedBuilder[] {
+  return items.map((item) => ({
+    id: item.id,
+    slug: item.slug,
+    kind: item.kind,
+    name: item.name,
+    specialty: item.specialty,
+    image: item.image,
+    location: item.location,
+    builds: item.builds,
+  }));
+}
+
+function matchesCity(value: string | undefined, city: CityFilter) {
+  return value?.toUpperCase().includes(city) ?? false;
+}
+
+function builderSectionTitle(query: string) {
+  const normalized = query.trim().toLowerCase();
+  if (normalized === "under $5k" || normalized === "under 5k") {
+    return "Builders selling under $5K bikes";
+  }
+  if (normalized === "project") return "Builders with project bikes";
+  if (normalized === "rare") return "Builders with rare bikes";
+  if (normalized === "rideable") return "Builders with rideable bikes";
+  if (normalized === "minneapolis") return "Builders in Minneapolis";
+  if (["builder", "builders", "shop", "shops", "seller", "sellers"].includes(normalized)) {
+    return "Builders";
+  }
+  return "Builders with matching bikes";
 }
 
 function sortListings(items: TaggedListing[], sort: SortOption) {
   const sorted = [...items];
   switch (sort) {
     case "NEWEST":
-      return sorted.sort((a, b) => b.year - a.year);
+      return sorted.sort((a, b) => {
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        if (bTime !== aTime) return bTime - aTime;
+        return b.year - a.year;
+      });
     case "PRICE ↑":
       return sorted.sort((a, b) => a.price - b.price);
     case "PRICE ↓":
@@ -124,24 +186,31 @@ function sortListings(items: TaggedListing[], sort: SortOption) {
 // ── Masonry Card ───────────────────────────────────────────────────
 function MasonryCard({
   item,
+  colWidth,
   onPress,
 }: {
   item: TaggedListing;
+  colWidth: number;
   onPress: () => void;
 }) {
   return (
-    <Pressable style={styles.masonryCard} onPress={onPress}>
+    <Pressable style={[styles.masonryCard, { width: colWidth }]} onPress={onPress}>
       <View
-        style={[styles.masonryImgWrap, { height: cardImageHeight(item.id) }]}
+        style={[styles.masonryImgWrap, { width: colWidth, height: cardImageHeight(item.id, colWidth) }]}
       >
-        <Image
-          source={{ uri: item.image }}
-          style={styles.masonryImg}
-          contentFit="cover"
-          cachePolicy={IMAGE_CACHE}
-          placeholder={IMAGE_PLACEHOLDER}
-          recyclingKey={item.image}
-        />
+        {item.image ? (
+          <Image
+            source={{ uri: item.image }}
+            style={styles.masonryImg}
+            contentFit="cover"
+            cachePolicy={IMAGE_CACHE}
+            recyclingKey={item.image}
+          />
+        ) : (
+          <View style={styles.imageFallback}>
+            <Text style={styles.imageFallbackText}>NO PHOTO</Text>
+          </View>
+        )}
         {item.viewers > 0 && (
           <View style={styles.viewerBadge}>
             <View style={styles.viewerLed} />
@@ -160,7 +229,7 @@ function MasonryCard({
             const t = getTagStyles(tag);
             return (
               <View key={tag} style={t.bg}>
-                <Text style={t.light ? styles.tagTextLight : styles.tagTextDark}>
+                <Text style={t.tone === "light" ? styles.tagTextLight : styles.tagTextDark}>
                   {tag}
                 </Text>
               </View>
@@ -172,37 +241,167 @@ function MasonryCard({
   );
 }
 
+function BikeListResult({
+  item,
+  onPress,
+}: {
+  item: TaggedListing;
+  onPress: () => void;
+}) {
+  const title = `${item.year} ${item.make} ${item.model}`;
+  const detail = [formatUsd(item.price), item.city].filter(Boolean).join(" · ");
+  const seller = item.sellerName ?? "Seller";
+
+  return (
+    <Pressable style={styles.bikeRow} onPress={onPress}>
+      <View style={styles.bikeRowImageWrap}>
+        {item.image ? (
+          <Image
+            source={{ uri: item.image }}
+            style={styles.bikeRowImage}
+            contentFit="cover"
+            cachePolicy={IMAGE_CACHE}
+            recyclingKey={item.image}
+          />
+        ) : (
+          <View style={styles.imageFallback}>
+            <Text style={styles.imageFallbackText}>NO PHOTO</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.bikeRowCopy}>
+        <Text style={styles.bikeRowTitle} numberOfLines={2}>
+          {title}
+        </Text>
+        <Text style={styles.bikeRowDetail} numberOfLines={1}>
+          {detail}
+        </Text>
+        <Text style={styles.bikeRowSeller} numberOfLines={1}>
+          {seller}
+        </Text>
+        <View style={styles.tagRow}>
+          {item.tags.slice(0, 2).map((tag) => {
+            const t = getTagStyles(tag);
+            return (
+              <View key={tag} style={t.bg}>
+                <Text style={t.tone === "light" ? styles.tagTextLight : styles.tagTextDark}>
+                  {tag}
+                </Text>
+              </View>
+            );
+          })}
+        </View>
+      </View>
+    </Pressable>
+  );
+}
+
+function BuilderResult({
+  item,
+  onPress,
+}: {
+  item: TaggedBuilder;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable style={styles.builderResult} onPress={onPress}>
+      <View style={styles.builderImageWrap}>
+        {item.image ? (
+          <Image
+            source={{ uri: item.image }}
+            style={styles.builderImage}
+            contentFit="cover"
+            cachePolicy={IMAGE_CACHE}
+          />
+        ) : (
+          <Text style={styles.builderInitial}>{item.name[0]}</Text>
+        )}
+      </View>
+      <View style={styles.builderCopy}>
+        <Text style={styles.builderLabel}>BUILDER</Text>
+        <Text style={styles.builderName} numberOfLines={1}>
+          {item.name}
+        </Text>
+        <Text style={styles.builderMeta} numberOfLines={1}>
+          {[item.specialty, item.location].filter(Boolean).join(" · ")}
+        </Text>
+      </View>
+      <Text style={styles.builderCount}>
+        {item.matchingBikeCount
+          ? `${item.matchingBikeCount} match${item.matchingBikeCount === 1 ? "" : "es"}`
+          : `${item.builds} bikes`}
+      </Text>
+    </Pressable>
+  );
+}
+
 // ── Main Component ─────────────────────────────────────────────────
 export default function SearchScreen() {
-  const [query, setQuery] = useState("");
+  const params = useLocalSearchParams<{ q?: string }>();
+  const initialQuery = typeof params.q === "string" ? params.q : "";
+  const [query, setQuery] = useState(initialQuery);
   const [city, setCity] = useState<CityFilter>("ALL");
   const [refine, setRefine] = useState<RefineFilter>("ALL");
   const [sort, setSort] = useState<SortOption>("NEWEST");
   const router = useRouter();
-  const { data: listings = [] } = useQuery({
+  const { width } = useWindowDimensions();
+  const colWidth = (width - SPACING.page * 2 - MASONRY_GAP) / 2;
+  const { data, isPending } = useQuery({
     queryKey: ["search-listings"],
-    queryFn: async () => tagListings(await fetchListings()),
-    initialData: [] as TaggedListing[],
+    queryFn: async (): Promise<SearchData> => {
+      const [listings, builders] = await Promise.all([
+        fetchListings(),
+        fetchBuilders(),
+      ]);
+      return {
+        bikes: tagListings(listings),
+        builders: tagBuilders(builders),
+      };
+    },
   });
+  const listings = data?.bikes ?? EMPTY_BIKES;
+  const builders = data?.builders ?? EMPTY_BUILDERS;
 
   const hasQuery = query.trim().length > 0;
 
-  const results = useMemo(() => {
-    if (!hasQuery) return [];
+  useEffect(() => {
+    const nextQuery = typeof params.q === "string" ? params.q : "";
+    if (nextQuery) {
+      setQuery(nextQuery);
+      setRefine("ALL");
+      setCity("ALL");
+    }
+  }, [params.q]);
+
+  const { bikeResults, builderResults } = useMemo(() => {
+    if (!hasQuery) {
+      return { bikeResults: [] as TaggedListing[], builderResults: [] as TaggedBuilder[] };
+    }
 
     const q = query.trim().toLowerCase();
-    let filtered = listings.filter(
+    const isBuilderQuery = ["builder", "builders", "shop", "shops", "seller", "sellers"].includes(q);
+    let filteredBikes = listings.filter(
       (r) =>
         r.make.toLowerCase().includes(q) ||
         r.model.toLowerCase().includes(q) ||
-        String(r.year).includes(q),
+        String(r.year).includes(q) ||
+        r.tags.some((tag) => tag.toLowerCase().includes(q)) ||
+        r.city?.toLowerCase().includes(q) ||
+        r.description?.toLowerCase().includes(q) ||
+        (q === "under $5k" && r.price < 5000) ||
+        (q === "under 5k" && r.price < 5000),
     );
+    const builderTextMatches = (r: TaggedBuilder) =>
+        isBuilderQuery ||
+        r.name.toLowerCase().includes(q) ||
+        r.specialty.toLowerCase().includes(q) ||
+        r.location?.toLowerCase().includes(q);
+    let filteredBuilders = builders.filter(builderTextMatches);
 
     // City filter
     if (city !== "ALL") {
-      filtered = filtered.filter(
-        (r) => (r.city ?? getCity(r.id)).toUpperCase() === city,
-      );
+      filteredBikes = filteredBikes.filter((r) => matchesCity(r.city, city));
+      filteredBuilders = filteredBuilders.filter((r) => matchesCity(r.location, city));
     }
 
     // Refine filter
@@ -210,20 +409,52 @@ export default function SearchScreen() {
       case "RIDEABLE":
       case "PROJECT":
       case "RARE":
-        filtered = filtered.filter((r) => r.tags.includes(refine));
+        filteredBikes = filteredBikes.filter((r) => r.tags.includes(refine));
         break;
     }
 
-    return sortListings(filtered, sort);
-  }, [query, hasQuery, city, refine, sort, listings]);
+    const matchingBikeCounts = new Map<string, number>();
+    filteredBikes.forEach((bike) => {
+      if (!bike.sellerId) return;
+      matchingBikeCounts.set(
+        bike.sellerId,
+        (matchingBikeCounts.get(bike.sellerId) ?? 0) + 1,
+      );
+    });
+    const builderPool =
+      city === "ALL"
+        ? builders
+        : builders.filter((builder) => matchesCity(builder.location, city));
+    const mergedBuilders = new Map<string, TaggedBuilder>();
+    filteredBuilders.forEach((builder) => {
+      mergedBuilders.set(builder.id, {
+        ...builder,
+        matchingBikeCount: matchingBikeCounts.get(builder.id),
+      });
+    });
+    builderPool.forEach((builder) => {
+      const matchingBikeCount = matchingBikeCounts.get(builder.id);
+      if (!matchingBikeCount || mergedBuilders.has(builder.id)) return;
+      mergedBuilders.set(builder.id, { ...builder, matchingBikeCount });
+    });
+
+    return {
+      bikeResults: sortListings(filteredBikes, sort),
+      builderResults: [...mergedBuilders.values()].sort((a, b) => {
+        const countDiff = (b.matchingBikeCount ?? 0) - (a.matchingBikeCount ?? 0);
+        if (countDiff !== 0) return countDiff;
+        return a.name.localeCompare(b.name);
+      }),
+    };
+  }, [query, hasQuery, city, refine, sort, listings, builders]);
 
   // Pre-split columns for masonry
   const { left, right } = useMemo(() => {
     const l: TaggedListing[] = [];
     const r: TaggedListing[] = [];
-    results.forEach((item, i) => (i % 2 === 0 ? l : r).push(item));
+    bikeResults.forEach((item, i) => (i % 2 === 0 ? l : r).push(item));
     return { left: l, right: r };
-  }, [results]);
+  }, [bikeResults]);
 
   const animateLayout = () => {
     LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
@@ -236,7 +467,24 @@ export default function SearchScreen() {
     setSort(SORT_OPTIONS[(idx + 1) % SORT_OPTIONS.length]);
   };
 
-  const hasResults = results.length > 0;
+  const resultCount = bikeResults.length + builderResults.length;
+  const hasResults = resultCount > 0;
+  const useListResults = bikeResults.length > 0 && bikeResults.length < 4;
+  const queryLabel = query.trim();
+  const bikeSummaryContext =
+    queryLabel.toLowerCase() === "under $5k" || queryLabel.toLowerCase() === "under 5k"
+      ? " under $5K"
+      : queryLabel && bikeResults.length > 0 && builderResults.length === 0
+        ? ` for ${queryLabel}`
+        : "";
+  const resultSummary = isPending
+    ? "Searching..."
+    : [
+        bikeResults.length ? `${bikeResults.length} bike${bikeResults.length === 1 ? "" : "s"}${bikeSummaryContext}` : "",
+        builderResults.length ? `${builderResults.length} builder${builderResults.length === 1 ? "" : "s"}` : "",
+      ].filter(Boolean).join(" · ");
+  const showBikeControls = bikeResults.length > 0 || refine !== "ALL" || builderResults.length === 0;
+  const buildersTitle = builderSectionTitle(queryLabel);
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
@@ -251,7 +499,7 @@ export default function SearchScreen() {
           style={styles.searchInput}
           value={query}
           onChangeText={setQuery}
-          placeholder="Year, make, model..."
+          placeholder="Search bikes or builders..."
           placeholderTextColor={COLORS.textFaint}
           autoCorrect={false}
           autoCapitalize="none"
@@ -259,7 +507,7 @@ export default function SearchScreen() {
         />
         {query.length > 0 && (
           <Pressable
-            onPress={() => { setQuery(""); setRefine("ALL"); }}
+            onPress={() => { setQuery(""); setRefine("ALL"); setCity("ALL"); }}
             hitSlop={12}
             style={styles.clearBtn}
           >
@@ -277,7 +525,7 @@ export default function SearchScreen() {
               <Pressable
                 key={term}
                 style={styles.trendingChip}
-                onPress={() => { hapticLight(); setQuery(term); }}
+                onPress={() => { hapticLight(); setQuery(term); setRefine("ALL"); setCity("ALL"); }}
               >
                 <Text style={styles.trendingChipText}>{term}</Text>
               </Pressable>
@@ -311,16 +559,18 @@ export default function SearchScreen() {
         </ScrollView>
       )}
 
-      {/* Condition filters — only after search has results */}
-      {hasQuery && hasResults && (
+      {/* Condition filters */}
+      {hasQuery && (
         <View style={styles.toolbar}>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.refineRow}
           >
-            <Text style={styles.resultCount}>{results.length}</Text>
-            {REFINE_FILTERS.map((f) => {
+            <Text style={styles.resultCount}>
+              {resultSummary || `${resultCount} results`}
+            </Text>
+            {showBikeControls && REFINE_FILTERS.map((f) => {
               const active = refine === f;
               return (
                 <Pressable
@@ -337,9 +587,11 @@ export default function SearchScreen() {
               );
             })}
           </ScrollView>
-          <Pressable onPress={cycleSort} hitSlop={8}>
-            <Text style={styles.sortText}>{sort}</Text>
-          </Pressable>
+          {showBikeControls ? (
+            <Pressable onPress={cycleSort} hitSlop={8}>
+              <Text style={styles.sortText}>{sort}</Text>
+            </Pressable>
+          ) : null}
         </View>
       )}
 
@@ -349,33 +601,65 @@ export default function SearchScreen() {
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.masonry}
         >
-          <View style={styles.masonryCol}>
-            {left.map((item) => (
-              <MasonryCard
-                key={item.id}
-                item={item}
-                onPress={() => router.push(`/listing/${item.id}`)}
-              />
-            ))}
-          </View>
-          <View style={styles.masonryCol}>
-            {right.map((item) => (
-              <MasonryCard
-                key={item.id}
-                item={item}
-                onPress={() => router.push(`/listing/${item.id}`)}
-              />
-            ))}
-          </View>
+          {bikeResults.length > 0 && (
+            useListResults ? (
+              <View style={styles.bikeListResults}>
+                {bikeResults.map((item) => (
+                  <BikeListResult
+                    key={item.id}
+                    item={item}
+                    onPress={() => router.push(`/listing/${item.id}`)}
+                  />
+                ))}
+              </View>
+            ) : (
+              <View style={styles.masonryGrid}>
+                <View style={[styles.masonryCol, { width: colWidth }]}>
+                  {left.map((item) => (
+                    <MasonryCard
+                      key={item.id}
+                      item={item}
+                      colWidth={colWidth}
+                      onPress={() => router.push(`/listing/${item.id}`)}
+                    />
+                  ))}
+                </View>
+                <View style={[styles.masonryCol, { width: colWidth }]}>
+                  {right.map((item) => (
+                    <MasonryCard
+                      key={item.id}
+                      item={item}
+                      colWidth={colWidth}
+                      onPress={() => router.push(`/listing/${item.id}`)}
+                    />
+                  ))}
+                </View>
+              </View>
+            )
+          )}
+          {builderResults.length > 0 && (
+            <View style={styles.builderResults}>
+              <Text style={styles.resultSectionTitle}>{buildersTitle}</Text>
+              {builderResults.map((item) => (
+                <BuilderResult
+                  key={`builder-${item.id}`}
+                  item={item}
+                  onPress={() => {
+                    router.push(item.kind === "profile" ? `/builder/${item.slug}` : `/shop/${item.slug}`);
+                  }}
+                />
+              ))}
+            </View>
+          )}
         </ScrollView>
       )}
 
       {/* Searched but no results */}
-      {hasQuery && !hasResults && (
+      {hasQuery && !isPending && !hasResults && (
         <View style={styles.empty}>
           <Text style={styles.emptyTitle}>NOTHING HERE</Text>
           <Text style={styles.emptyBody}>
-            No matches for {query}. Try a different year, make, or model.
+            No matches for {query}. Try a different bike, builder, or location.
           </Text>
         </View>
       )}
@@ -392,14 +676,17 @@ const styles = StyleSheet.create({
   // Search input
   searchRow: {
     paddingHorizontal: SPACING.page,
-    marginBottom: SPACING.md,
+    marginBottom: SPACING.sm,
     flexDirection: "row",
     alignItems: "center",
   },
   searchInput: {
     ...S.input,
     flex: 1,
-    fontSize: 17,
+    minHeight: 48,
+    borderRadius: 8,
+    fontSize: 15,
+    paddingHorizontal: 16,
   },
   clearBtn: {
     marginLeft: SPACING.sm,
@@ -443,21 +730,22 @@ const styles = StyleSheet.create({
 
   // City chips
   cityScroller: {
-    maxHeight: 42,
+    maxHeight: 36,
     flexGrow: 0,
   },
   cityRow: {
     paddingHorizontal: SPACING.page,
-    gap: SPACING.sm,
-    paddingBottom: SPACING.sm,
+    gap: 6,
+    paddingBottom: 6,
     alignItems: "center",
   },
   cityChip: {
     borderWidth: 1,
     borderColor: COLORS.divider,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    height: 30,
+    borderRadius: 14,
+    paddingHorizontal: 11,
+    paddingVertical: 0,
+    height: 28,
     justifyContent: "center",
   },
   cityChipActive: {
@@ -479,17 +767,18 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     paddingRight: SPACING.page,
-    paddingVertical: SPACING.sm,
+    paddingTop: 8,
+    paddingBottom: 14,
   },
   refineRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: SPACING.md,
+    gap: 14,
     paddingHorizontal: SPACING.page,
     flex: 1,
   },
   resultCount: {
-    fontSize: 14,
+    fontSize: 13,
     fontFamily: F.bold,
     color: COLORS.textPrimary,
     marginRight: SPACING.xs,
@@ -517,24 +806,151 @@ const styles = StyleSheet.create({
 
   // Masonry grid
   masonry: {
-    flexDirection: "row",
     paddingHorizontal: SPACING.page,
-    gap: MASONRY_GAP,
     paddingBottom: SPACING.xl,
+    gap: SPACING.md,
+  },
+  bikeListResults: {
+    gap: SPACING.md,
+  },
+  bikeRow: {
+    flexDirection: "row",
+    gap: SPACING.md,
+    paddingBottom: SPACING.md,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  bikeRowImageWrap: {
+    width: 118,
+    height: 92,
+    borderRadius: 8,
+    overflow: "hidden",
+    backgroundColor: COLORS.surfaceRaised,
+  },
+  bikeRowImage: {
+    width: "100%",
+    height: "100%",
+  },
+  bikeRowCopy: {
+    flex: 1,
+    minWidth: 0,
+    paddingTop: 2,
+  },
+  bikeRowTitle: {
+    fontSize: 18,
+    lineHeight: 21,
+    fontFamily: F.bold,
+    letterSpacing: 0,
+    color: COLORS.textPrimary,
+    textTransform: "uppercase",
+  },
+  bikeRowDetail: {
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: F.semibold,
+    color: COLORS.textPrimary,
+    marginTop: 4,
+  },
+  bikeRowSeller: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  builderResults: {
+    gap: SPACING.sm,
+    paddingTop: SPACING.xs,
+  },
+  resultSectionTitle: {
+    fontSize: 17,
+    lineHeight: 21,
+    fontFamily: F.bold,
+    letterSpacing: 0,
+    color: COLORS.textPrimary,
+    marginBottom: 2,
+  },
+  builderResult: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: SPACING.sm,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.divider,
+  },
+  builderImageWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    overflow: "hidden",
+    backgroundColor: COLORS.surfaceRaised,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: SPACING.md,
+  },
+  builderImage: {
+    width: "100%",
+    height: "100%",
+  },
+  builderInitial: {
+    fontSize: 19,
+    fontFamily: F.bold,
+    color: COLORS.textMuted,
+  },
+  builderCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  builderLabel: {
+    fontSize: 9,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.6,
+    color: COLORS.textFaint,
+    marginBottom: 3,
+  },
+  builderName: {
+    fontSize: 18,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    letterSpacing: 0,
+  },
+  builderMeta: {
+    fontSize: 13,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 3,
+  },
+  builderCount: {
+    fontSize: 12,
+    fontFamily: F.monoBold,
+    color: COLORS.textMuted,
+    marginLeft: SPACING.sm,
+  },
+  masonryGrid: {
+    flexDirection: "row",
+    gap: MASONRY_GAP,
   },
   masonryCol: {
-    width: COL_W,
     gap: MASONRY_GAP,
   },
-  masonryCard: {
-    width: COL_W,
-  },
+  masonryCard: {},
   masonryImgWrap: {
-    width: COL_W,
     backgroundColor: COLORS.surface,
     overflow: "hidden",
   },
   masonryImg: { width: "100%", height: "100%" },
+  imageFallback: {
+    width: "100%",
+    height: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surfaceRaised,
+  },
+  imageFallbackText: {
+    fontSize: 9,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.2,
+    color: COLORS.textFaint,
+  },
   viewerBadge: S.viewerBadge,
   viewerLed: S.viewerLed,
   viewerText: S.viewerText,

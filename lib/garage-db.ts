@@ -57,6 +57,36 @@ function bikeFromRow(row: GarageBikeRow): GarageBikeRecord {
   };
 }
 
+const SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+// garage-bike-images is a private bucket, so a stored public URL no longer
+// resolves. Paths are signed per read; rows written before image_path existed
+// keep whatever URL they have.
+async function withSignedImageUrls(bikes: GarageBikeRecord[]) {
+  const paths = bikes
+    .map((bike) => bike.imagePath)
+    .filter((path): path is string => Boolean(path));
+
+  if (paths.length === 0) return bikes;
+
+  const { data, error } = await supabase.storage
+    .from("garage-bike-images")
+    .createSignedUrls(paths, SIGNED_URL_TTL_SECONDS);
+
+  if (error) return bikes;
+
+  const signed = new Map<string, string>();
+  for (const entry of data ?? []) {
+    if (entry.path && entry.signedUrl) signed.set(entry.path, entry.signedUrl);
+  }
+
+  return bikes.map((bike) =>
+    bike.imagePath && signed.has(bike.imagePath)
+      ? { ...bike, imageUri: signed.get(bike.imagePath) as string }
+      : bike,
+  );
+}
+
 export async function fetchGarageBikes(): Promise<GarageBikeRecord[]> {
   if (!isSupabaseConfigured) return [];
 
@@ -68,7 +98,7 @@ export async function fetchGarageBikes(): Promise<GarageBikeRecord[]> {
     .order("created_at", { ascending: false });
 
   if (error) throw error;
-  return ((data ?? []) as GarageBikeRow[]).map(bikeFromRow);
+  return withSignedImageUrls(((data ?? []) as GarageBikeRow[]).map(bikeFromRow));
 }
 
 export async function createGarageBike(
@@ -100,11 +130,11 @@ export async function createGarageBike(
 
   if (uploadError) throw uploadError;
 
-  const { data: publicUrlData } = supabase.storage
+  const { data: signedUrlData } = await supabase.storage
     .from("garage-bike-images")
-    .getPublicUrl(storagePath);
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
 
-  const imageUrl = publicUrlData.publicUrl;
+  const imageUrl = signedUrlData?.signedUrl ?? "";
 
   const { data, error } = await supabase
     .from("garage_bikes")
@@ -122,6 +152,16 @@ export async function createGarageBike(
 
   if (error) throw error;
   return bikeFromRow(data);
+}
+
+export async function refreshGarageBikeImageUrl(imagePath: string) {
+  if (!isSupabaseConfigured || !imagePath) return "";
+
+  const { data } = await supabase.storage
+    .from("garage-bike-images")
+    .createSignedUrl(imagePath, SIGNED_URL_TTL_SECONDS);
+
+  return data?.signedUrl ?? "";
 }
 
 export async function updateGarageBikeAnalysis(

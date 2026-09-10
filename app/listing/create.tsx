@@ -1,21 +1,22 @@
 import { Alert, View, Text, TextInput, StyleSheet, Pressable, ScrollView, Dimensions } from 'react-native';
-import { useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '@/hooks/useHaptics';
 import { importFromUrl } from '@/hooks/useMarketplaceImport';
-import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING, TYPE } from '@/constants/design';
+import { COLORS, F, IMAGE_CACHE, SPACING, TYPE } from '@/constants/design';
 import { S } from '@/constants/styles';
 import { XIcon } from 'phosphor-react-native';
 import { createListing, type ListingImageInput } from '@/lib/registry-db';
+import { fetchGarageDetails } from '@/lib/garage-profile-db';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
+import { useQueryClient } from '@tanstack/react-query';
 
 const SCREEN_W = Dimensions.get('window').width;
 const MAX_PHOTOS = 10;
-const MIN_PHOTOS = 3;
 const PHOTO_SIZE = (SCREEN_W - SPACING.page * 2 - SPACING.sm * 2) / 3;
 
 const listingSchema = z.object({
@@ -68,8 +69,20 @@ function sourceFromUrl(url: string) {
   };
 }
 
+function formatNumberInput(value: string) {
+  const digits = value.replace(/[^\d]/g, "");
+  return digits ? Number(digits).toLocaleString("en-US") : "";
+}
+
+function formatPriceInput(value: string) {
+  const formatted = formatNumberInput(value);
+  return formatted ? `$${formatted}` : "";
+}
+
 export default function CreateListingScreen() {
   const router = useRouter();
+  const { mode: initialMode, source } = useLocalSearchParams<{ mode?: string; source?: string }>();
+  const queryClient = useQueryClient();
   const {
     control,
     handleSubmit,
@@ -92,12 +105,37 @@ export default function CreateListingScreen() {
   const [fbLink, setFbLink] = useState('');
   const [importing, setImporting] = useState(false);
   const [importStep, setImportStep] = useState<"idle" | "pulling" | "complete">("idle");
-  const [mode, setMode] = useState<ListingCreateMode>(null);
+  const [importMissingFields, setImportMissingFields] = useState<string[]>([]);
+  const [mode, setMode] = useState<ListingCreateMode>(
+    initialMode === 'import' || initialMode === 'manual' ? initialMode : null,
+  );
+  const handledInitialSourceRef = useRef(false);
   const isBusy = importing || isSubmitting;
   const showListingDetails = mode === 'manual' || importStep === 'complete';
   const detectedSource = sourceFromUrl(fbLink);
 
-  const pickPhotos = async () => {
+  useEffect(() => {
+    if (initialMode === 'import' || initialMode === 'manual') {
+      setMode(initialMode);
+    }
+  }, [initialMode]);
+
+  const closeImportMode = () => {
+    if (isBusy) return;
+    hapticLight();
+    setMode(null);
+    setFbLink('');
+    setImportStep("idle");
+    setImportMissingFields([]);
+  };
+
+  const closeManualMode = () => {
+    if (isBusy) return;
+    hapticLight();
+    setMode(null);
+  };
+
+  const pickPhotos = useCallback(async () => {
     if (isBusy || photos.length >= MAX_PHOTOS) return;
     hapticLight();
     const remaining = Math.max(1, MAX_PHOTOS - photos.length);
@@ -113,6 +151,8 @@ export default function CreateListingScreen() {
       selectionLimit: remaining,
       quality: 0.8,
       base64: true,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     });
 
     if (result.canceled) return;
@@ -122,11 +162,52 @@ export default function CreateListingScreen() {
       .map((asset) => ({
         uri: asset.uri,
         base64: asset.base64 ?? undefined,
-        mimeType: asset.mimeType ?? 'image/jpeg',
+        mimeType: asset.base64 ? 'image/jpeg' : asset.mimeType ?? 'image/jpeg',
       }));
     if (selected.length === 0) return;
     setPhotos((prev) => [...prev, ...selected].slice(0, MAX_PHOTOS));
-  };
+  }, [isBusy, photos.length]);
+
+  const takePhoto = useCallback(async () => {
+    if (isBusy || photos.length >= MAX_PHOTOS) return;
+    hapticLight();
+    const permission = await ImagePicker.requestCameraPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert('Camera Needed', 'Allow camera access to take a listing photo.');
+      return;
+    }
+
+    const result = await ImagePicker.launchCameraAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
+      base64: true,
+    });
+
+    if (result.canceled) return;
+    const asset = result.assets[0];
+    if (!asset?.uri) return;
+    setPhotos((prev) => [
+      ...prev,
+      {
+        uri: asset.uri,
+        base64: asset.base64 ?? undefined,
+        mimeType: asset.base64 ? 'image/jpeg' : asset.mimeType ?? 'image/jpeg',
+      },
+    ].slice(0, MAX_PHOTOS));
+  }, [isBusy, photos.length]);
+
+  useEffect(() => {
+    if (handledInitialSourceRef.current || isBusy) return;
+    if (source !== 'photo' && source !== 'library') return;
+
+    handledInitialSourceRef.current = true;
+    setMode('manual');
+    if (source === 'photo') {
+      takePhoto();
+    } else {
+      pickPhotos();
+    }
+  }, [isBusy, pickPhotos, source, takePhoto]);
 
   const handleImportFB = async () => {
     if (isBusy) return;
@@ -138,6 +219,7 @@ export default function CreateListingScreen() {
     hapticMedium();
     setImporting(true);
     setImportStep("pulling");
+    setImportMissingFields([]);
     setError('root', { message: '' });
     try {
       const listing = await importFromUrl(url);
@@ -145,19 +227,26 @@ export default function CreateListingScreen() {
       if (listing.year) setValue('year', listing.year, { shouldValidate: true });
       if (listing.make) setValue('make', listing.make, { shouldValidate: true });
       if (listing.model) setValue('model', listing.model, { shouldValidate: true });
-      if (listing.price) setValue('price', listing.price, { shouldValidate: true });
-      if (listing.mileage) setValue('mileage', listing.mileage);
+      if (listing.price) setValue('price', formatPriceInput(listing.price), { shouldValidate: true });
+      if (listing.mileage) setValue('mileage', formatNumberInput(listing.mileage));
       if (listing.description) setValue('description', listing.description);
       if (listing.condition) setRideable(listing.condition.toLowerCase() !== 'project');
       if (listing.images.length > 0) {
         setPhotos(listing.images.slice(0, MAX_PHOTOS).map((uri) => ({ uri })));
       }
+      setImportMissingFields([
+        !listing.year ? "year" : "",
+        !listing.make ? "make" : "",
+        !listing.model ? "model" : "",
+        !listing.mileage ? "mileage" : "",
+        !listing.price ? "asking price" : "",
+      ].filter(Boolean));
       setImportStep("complete");
-      setMode('manual');
       setFbLink('');
     } catch (e: any) {
       hapticWarning();
       setImportStep("idle");
+      setImportMissingFields([]);
       Alert.alert('Import Failed', e?.message ?? 'Could not extract listing data. Try filling in manually.');
     } finally {
       setImporting(false);
@@ -165,18 +254,34 @@ export default function CreateListingScreen() {
   };
 
   const submitListing = async (values: ListingForm) => {
-    if (photos.length < MIN_PHOTOS) {
-      hapticWarning();
-      Alert.alert('Add Photos', `Add at least ${MIN_PHOTOS} photos before listing.`);
-      return;
-    }
-
     try {
+      const garageDetails = await fetchGarageDetails().catch(() => null);
+      if (!garageDetails?.garageName?.trim()) {
+        Alert.alert(
+          'Seller profile needed',
+          'Add a garage name before publishing your first listing.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Add garage name',
+              onPress: () => router.push('/garage/details'),
+            },
+          ],
+        );
+        return;
+      }
       const listing = await createListing({
         ...values,
         condition: rideable ? 'rideable' : 'project',
         images: photos,
       });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["home"] }),
+        queryClient.invalidateQueries({ queryKey: ["shops-tab"] }),
+        queryClient.invalidateQueries({ queryKey: ["profile-stats"] }),
+        queryClient.invalidateQueries({ queryKey: ["search-listings"] }),
+        queryClient.invalidateQueries({ queryKey: ["listing-category"] }),
+      ]);
       hapticSuccess();
       router.replace(`/listing/${listing.id}`);
     } catch (e: any) {
@@ -195,118 +300,152 @@ export default function CreateListingScreen() {
       >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Sell a bike</Text>
-        <Text style={styles.headerBody}>
-          Start from a marketplace link or enter the bike details yourself.
-        </Text>
       </View>
 
       <View style={styles.modeGrid}>
-        <Pressable
-          style={[styles.modeCard, mode === 'import' && styles.modeCardActive]}
-          onPress={() => {
-            hapticLight();
-            setMode('import');
-          }}
-          disabled={isBusy}
-        >
-          <Text style={styles.modeTitle}>Post from a source</Text>
-          <Text style={styles.modeBody}>
-            Paste a Facebook, Craigslist, or Cycle Trader link and we will pull details.
-          </Text>
-          {mode === 'import' || importStep === 'complete' ? (
-            <View style={styles.embeddedImport}>
-              <View style={styles.sourceRow}>
-                {(detectedSource ? [detectedSource] : SOURCE_OPTIONS).map((source) => (
-                  <View
-                    key={source.key}
-                    style={[
-                      styles.sourcePill,
-                      detectedSource?.key === source.key && styles.sourcePillActive,
-                    ]}
+        {mode !== 'manual' ? (
+          <Pressable
+            style={[styles.modeCard, mode === 'import' && styles.modeCardActive]}
+            onPress={() => {
+              if (mode === 'import') return;
+              hapticLight();
+              setMode('import');
+            }}
+            disabled={isBusy}
+          >
+            {mode === 'import' ? (
+              <Pressable
+                style={styles.modeClose}
+                onPress={closeImportMode}
+                disabled={isBusy}
+                hitSlop={10}
+              >
+                <XIcon color={COLORS.textPrimary} size={18} weight="bold" />
+              </Pressable>
+            ) : null}
+            <Text style={styles.modeTitle}>Post from a source</Text>
+            <Text style={styles.modeBody}>
+              Paste a Facebook, Craigslist, or Cycle Trader link and we will pull details.
+            </Text>
+            {mode === 'import' || importStep === 'complete' ? (
+              <View style={styles.embeddedImport}>
+                <View style={styles.sourceRow}>
+                  {(detectedSource ? [detectedSource] : SOURCE_OPTIONS).map((source) => (
+                    <View
+                      key={source.key}
+                      style={[
+                        styles.sourcePill,
+                        detectedSource?.key === source.key && styles.sourcePillActive,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.sourceIcon,
+                          detectedSource?.key === source.key && styles.sourceIconActive,
+                        ]}
+                      >
+                        {source.icon}
+                      </Text>
+                      <Text
+                        style={[
+                          styles.sourceText,
+                          detectedSource?.key === source.key && styles.sourceTextActive,
+                        ]}
+                      >
+                        {source.label}
+                      </Text>
+                    </View>
+                  ))}
+                </View>
+                <View style={styles.importRow}>
+                  <TextInput
+                    style={styles.importInput}
+                    value={fbLink}
+                    onChangeText={(text) => {
+                      setFbLink(text);
+                      if (text.trim()) setMode('import');
+                    }}
+                    placeholder="Paste listing URL..."
+                    placeholderTextColor={COLORS.textFaint}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="url"
+                    editable={!isBusy}
+                  />
+                  <Pressable
+                    style={[styles.importBtn, !fbLink.trim() && styles.importBtnDisabled]}
+                    onPress={handleImportFB}
+                    disabled={!fbLink.trim() || isBusy}
                   >
-                    <Text
-                      style={[
-                        styles.sourceIcon,
-                        detectedSource?.key === source.key && styles.sourceIconActive,
-                      ]}
-                    >
-                      {source.icon}
+                    <Text style={styles.importBtnText}>
+                      {importing ? 'Pulling' : 'Pull'}
                     </Text>
-                    <Text
+                  </Pressable>
+                </View>
+                {importStep !== "idle" ? (
+                  <View style={styles.importStatus}>
+                    <View
                       style={[
-                        styles.sourceText,
-                        detectedSource?.key === source.key && styles.sourceTextActive,
+                        styles.importStatusDot,
+                        importStep === "complete" && styles.importStatusDotComplete,
                       ]}
-                    >
-                      {source.label}
+                    />
+                    <Text style={styles.importStatusText}>
+                      {importStep === "pulling"
+                        ? "Pulling listing details and photos. Keep this screen open."
+                        : importMissingFields.length > 0
+                          ? `${photos.length} photo${photos.length === 1 ? "" : "s"} pulled. Add ${importMissingFields.join(", ")} below.`
+                          : `${photos.length} photo${photos.length === 1 ? "" : "s"} pulled. Review the fields below.`}
                     </Text>
                   </View>
-                ))}
+                ) : null}
               </View>
-              <View style={styles.importRow}>
-                <TextInput
-                  style={styles.importInput}
-                  value={fbLink}
-                  onChangeText={(text) => {
-                    setFbLink(text);
-                    if (text.trim()) setMode('import');
-                  }}
-                  placeholder="Paste listing URL..."
-                  placeholderTextColor={COLORS.textFaint}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="url"
-                  editable={!isBusy}
-                />
-                <Pressable
-                  style={[styles.importBtn, !fbLink.trim() && styles.importBtnDisabled]}
-                  onPress={handleImportFB}
-                  disabled={!fbLink.trim() || isBusy}
-                >
-                  <Text style={styles.importBtnText}>
-                    {importing ? 'Pulling' : 'Pull'}
-                  </Text>
-                </Pressable>
-              </View>
-              {importStep !== "idle" ? (
-                <View style={styles.importStatus}>
-                  <View
-                    style={[
-                      styles.importStatusDot,
-                      importStep === "complete" && styles.importStatusDotComplete,
-                    ]}
-                  />
-                  <Text style={styles.importStatusText}>
-                    {importStep === "pulling"
-                      ? "Pulling listing details and photos. Keep this screen open."
-                      : `${photos.length} photo${photos.length === 1 ? "" : "s"} pulled. Review the fields below.`}
-                  </Text>
-                </View>
-              ) : null}
-            </View>
-          ) : null}
-        </Pressable>
-        <Pressable
-          style={[styles.modeCard, mode === 'manual' && styles.modeCardActive]}
-          onPress={() => {
-            hapticLight();
-            setMode('manual');
-          }}
-          disabled={isBusy}
-        >
-          <Text style={styles.modeTitle}>Enter manually</Text>
-          <Text style={styles.modeBody}>
-            Add photos, price, specs, and description yourself.
-          </Text>
-        </Pressable>
+            ) : null}
+          </Pressable>
+        ) : null}
+        {mode !== 'import' ? (
+          <Pressable
+            style={[styles.modeCard, mode === 'manual' && styles.modeCardActive]}
+            onPress={() => {
+              if (mode === 'manual') return;
+              hapticLight();
+              setMode('manual');
+            }}
+            disabled={isBusy}
+          >
+            {mode === 'manual' ? (
+              <Pressable
+                style={styles.modeClose}
+                onPress={closeManualMode}
+                disabled={isBusy}
+                hitSlop={10}
+              >
+                <XIcon color={COLORS.textPrimary} size={18} weight="bold" />
+              </Pressable>
+            ) : null}
+            <Text style={styles.modeTitle}>Enter manually</Text>
+            <Text style={styles.modeBody}>
+              Add photos, price, specs, and description yourself.
+            </Text>
+            {mode === 'manual' ? (
+              <Text style={styles.modeNote}>
+                All listings require admin approval before publishing.
+              </Text>
+            ) : null}
+          </Pressable>
+        ) : null}
       </View>
 
       {showListingDetails ? (
       <>
-        <Text style={styles.note}>
-          All listings require admin approval before publishing.
-        </Text>
-        <View style={styles.divider} />
+        {mode !== 'manual' ? (
+          <>
+            <Text style={styles.note}>
+              All listings require admin approval before publishing.
+            </Text>
+            <View style={styles.divider} />
+          </>
+        ) : null}
 
       <Text style={styles.label}>PHOTOS</Text>
       {photos.length > 0 ? (
@@ -318,7 +457,6 @@ export default function CreateListingScreen() {
                 style={styles.photoThumbImg}
                 contentFit="cover"
                 cachePolicy={IMAGE_CACHE}
-                placeholder={IMAGE_PLACEHOLDER}
               />
               <Pressable
                 style={styles.photoRemove}
@@ -346,7 +484,7 @@ export default function CreateListingScreen() {
       ) : (
         <Pressable style={styles.photoUpload} onPress={pickPhotos} disabled={isBusy}>
           <Text style={styles.photoUploadText}>+ ADD PHOTOS</Text>
-          <Text style={styles.photoUploadSubtext}>Minimum {MIN_PHOTOS}, up to {MAX_PHOTOS}</Text>
+          <Text style={styles.photoUploadSubtext}>Up to {MAX_PHOTOS} photos</Text>
         </Pressable>
       )}
 
@@ -362,8 +500,6 @@ export default function CreateListingScreen() {
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
-                placeholder="1975"
-                placeholderTextColor={COLORS.textMuted}
                 keyboardType="number-pad"
                 editable={!isBusy}
               />
@@ -381,8 +517,6 @@ export default function CreateListingScreen() {
                 value={value}
                 onChangeText={onChange}
                 onBlur={onBlur}
-                placeholder="Honda"
-                placeholderTextColor={COLORS.textMuted}
                 editable={!isBusy}
               />
             )}
@@ -400,8 +534,6 @@ export default function CreateListingScreen() {
             value={value}
             onChangeText={onChange}
             onBlur={onBlur}
-            placeholder="CB550"
-            placeholderTextColor={COLORS.textMuted}
             editable={!isBusy}
           />
         )}
@@ -417,10 +549,8 @@ export default function CreateListingScreen() {
               <TextInput
                 style={styles.input}
                 value={value}
-                onChangeText={onChange}
+                onChangeText={(text) => onChange(formatNumberInput(text))}
                 onBlur={onBlur}
-                placeholder="23,400"
-                placeholderTextColor={COLORS.textMuted}
                 keyboardType="number-pad"
                 editable={!isBusy}
               />
@@ -436,10 +566,8 @@ export default function CreateListingScreen() {
               <TextInput
                 style={styles.input}
                 value={value}
-                onChangeText={onChange}
+                onChangeText={(text) => onChange(formatPriceInput(text))}
                 onBlur={onBlur}
-                placeholder="$4,200"
-                placeholderTextColor={COLORS.textMuted}
                 keyboardType="number-pad"
                 editable={!isBusy}
               />
@@ -476,8 +604,6 @@ export default function CreateListingScreen() {
             value={value}
             onChangeText={onChange}
             onBlur={onBlur}
-            placeholder="Condition, history, modifications, what's included."
-            placeholderTextColor={COLORS.textMuted}
             multiline
             numberOfLines={5}
             textAlignVertical="top"
@@ -516,9 +642,6 @@ export default function CreateListingScreen() {
 
       {showListingDetails ? (
       <View style={styles.bottomBar}>
-        <Pressable style={[styles.draftButton, isBusy && styles.submitButtonDisabled]} disabled={isBusy}>
-          <Text style={styles.draftButtonText}>Save to drafts</Text>
-        </Pressable>
         <Pressable
           style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
           onPress={handleSubmit(submitListing)}
@@ -551,11 +674,6 @@ const styles = StyleSheet.create({
     fontFamily: F.bold,
     color: COLORS.textPrimary,
   },
-  headerBody: {
-    ...TYPE.body,
-    color: COLORS.textSecondary,
-    marginTop: SPACING.sm,
-  },
   modeGrid: {
     gap: SPACING.sm,
     marginBottom: SPACING.lg,
@@ -569,6 +687,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: SPACING.md,
     paddingVertical: 12,
     justifyContent: "center",
+  },
+  modeClose: {
+    position: "absolute",
+    top: 12,
+    right: 12,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.gray100,
+    alignItems: "center",
+    justifyContent: "center",
+    zIndex: 1,
   },
   modeCardActive: {
     borderColor: COLORS.black,
@@ -586,6 +716,16 @@ const styles = StyleSheet.create({
     fontFamily: F.regular,
     color: COLORS.textSecondary,
     marginTop: 4,
+  },
+  modeNote: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: F.regular,
+    color: COLORS.textSecondary,
+    marginTop: SPACING.md,
+    paddingTop: SPACING.md,
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
   },
   embeddedImport: {
     marginTop: SPACING.md,
@@ -802,21 +942,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
     backgroundColor: COLORS.white,
-    flexDirection: "row",
-    gap: 14,
     paddingHorizontal: SPACING.page,
     paddingTop: 14,
     paddingBottom: 24,
-  },
-  draftButton: {
-    ...S.secondaryButton,
-    flex: 1,
-    minHeight: 58,
-    paddingVertical: 0,
-  },
-  draftButtonText: {
-    ...S.secondaryButtonText,
-    fontSize: 17,
   },
   submitButton: {
     ...S.primaryButton,

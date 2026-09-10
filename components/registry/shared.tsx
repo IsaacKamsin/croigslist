@@ -3,7 +3,7 @@
  * Used across multiple registry sections
  */
 import { CATEGORIES } from "@/components/icons/CategoryIcons";
-import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING } from "@/constants/design";
+import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { formatUsd } from "@/lib/formatters";
 import { Image } from "expo-image";
 import React from "react";
@@ -43,10 +43,17 @@ export const SectionHead = React.memo(
     onSeeAll?: () => void;
   }) => (
     <View style={s.secHead}>
-      <View style={{ flex: 1 }}>
+      <Pressable
+        style={s.secTitleBlock}
+        onPress={onSeeAll}
+        disabled={!onSeeAll}
+        hitSlop={onSeeAll ? 8 : undefined}
+        accessibilityRole={onSeeAll ? "button" : undefined}
+        accessibilityLabel={onSeeAll ? `View all ${title}` : undefined}
+      >
         <Text style={s.secTitle}>{title}</Text>
         {sub && <Text style={s.secSub}>{sub}</Text>}
-      </View>
+      </Pressable>
       {onSeeAll && (
         <Pressable onPress={onSeeAll} hitSlop={12}>
           <Text style={s.seeAll}>SEE ALL</Text>
@@ -67,7 +74,6 @@ export const HCard = React.memo(
           style={s.hcardImg}
           contentFit="cover"
           cachePolicy={IMAGE_CACHE}
-          placeholder={IMAGE_PLACEHOLDER}
           recyclingKey={image}
         />
         {viewers > 0 && (
@@ -149,26 +155,31 @@ export const s = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "flex-start",
     paddingHorizontal: P,
-    marginTop: 44,
+    marginTop: 26,
     marginBottom: 12,
   },
+  secTitleBlock: {
+    flex: 1,
+    paddingRight: 12,
+  },
   secTitle: {
-    fontSize: 18,
+    fontSize: 20,
+    lineHeight: 24,
     fontFamily: F.semibold,
     color: COLORS.textPrimary,
     letterSpacing: 0,
   },
   secSub: {
-    fontSize: 11,
+    fontSize: 13,
     fontFamily: F.regular,
     color: COLORS.textMuted,
-    marginTop: 2,
-    lineHeight: 15,
+    marginTop: 3,
+    lineHeight: 17,
   },
   seeAll: {
-    fontSize: 9,
+    fontSize: 10,
     fontFamily: F.monoMedium,
-    letterSpacing: 1,
+    letterSpacing: 1.1,
     color: COLORS.textMuted,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.divider,
@@ -204,24 +215,25 @@ export const s = StyleSheet.create({
   },
   hcardViewerText: { fontSize: 9, fontFamily: F.monoBold, color: COLORS.white },
   hcardMeta: {
-    fontSize: 9,
-    fontFamily: F.mono,
-    color: COLORS.textFaint,
-    letterSpacing: 1,
+    fontSize: 13,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    letterSpacing: 0,
     marginTop: 8,
   },
   hcardModel: {
-    fontSize: 15,
-    fontFamily: F.bold,
+    fontSize: 16,
+    lineHeight: 19,
+    fontFamily: F.semibold,
     color: COLORS.textPrimary,
     marginTop: 1,
     letterSpacing: 0,
   },
   hcardPrice: {
-    fontSize: 13,
-    fontFamily: F.monoBold,
+    fontSize: 15,
+    fontFamily: F.semibold,
     color: COLORS.textPrimary,
-    marginTop: 4,
+    marginTop: 3,
   },
 
   // Horizontal scroll

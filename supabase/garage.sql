@@ -1,5 +1,6 @@
+-- Private: garage photos are owner-only, served through signed URLs.
 insert into storage.buckets (id, name, public)
-values ('garage-bike-images', 'garage-bike-images', true)
+values ('garage-bike-images', 'garage-bike-images', false)
 on conflict (id) do update set public = excluded.public;
 
 create table if not exists public.garage_bikes (
@@ -70,8 +71,15 @@ with check (
   and auth.uid()::text = (storage.foldername(name))[1]
 );
 
+-- World-readable SELECT also made the bucket world-LISTABLE, which enumerated
+-- user ids and every uploaded file. Public buckets still serve
+-- /object/public/<path> without consulting RLS, so images keep loading.
 drop policy if exists "Garage bike images are publicly readable" on storage.objects;
-create policy "Garage bike images are publicly readable"
+drop policy if exists "Owners can list their garage-bike-images" on storage.objects;
+create policy "Owners can list their garage-bike-images"
 on storage.objects for select
-to public
-using (bucket_id = 'garage-bike-images');
+to authenticated
+using (
+  bucket_id = 'garage-bike-images'
+  and auth.uid()::text = (storage.foldername(name))[1]
+);

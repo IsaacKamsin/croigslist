@@ -2,7 +2,7 @@
  * Registry section components
  * Each section is isolated and memo'd for scroll performance
  */
-import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING } from "@/constants/design";
+import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { formatUsd } from "@/lib/formatters";
 import type { RegistryListing, RegistryShop, SoldListing } from "@/lib/registry-db";
 import { Image } from "expo-image";
@@ -40,7 +40,6 @@ export const HeroSection = React.memo(
           style={s.heroImg}
           contentFit="cover"
           cachePolicy={IMAGE_CACHE}
-          placeholder={IMAGE_PLACEHOLDER}
         />
         <LinearGradient
           colors={["transparent", COLORS.overlay78]}
@@ -373,14 +372,14 @@ export const ProjectBikesSection = React.memo(
 );
 ProjectBikesSection.displayName = "ProjectBikesSection";
 
-// ── Shops ─────────────────────────────────────────────────────────────
+// ── Builders ──────────────────────────────────────────────────────────
 export const ShopsSection = React.memo(
   ({
     shops,
     goShop,
     onSeeAll,
-    title = "Shops you might like",
-    sub = "Builders, private sellers, and shops worth following.",
+    title = "Builders you might like",
+    sub = "Builders and sellers worth following.",
   }: {
     shops: RegistryShop[];
     goShop: (slug: string) => void;
@@ -444,7 +443,6 @@ export const FeatureSection = React.memo(
           style={s.featureImg}
           contentFit="cover"
           cachePolicy={IMAGE_CACHE}
-          placeholder={IMAGE_PLACEHOLDER}
         />
         <LinearGradient
           colors={[COLORS.overlay10, COLORS.overlay85]}
@@ -610,22 +608,23 @@ const s = StyleSheet.create({
     borderColor: COLORS.whiteA50,
   },
   gridCardMeta: {
-    fontSize: 12,
+    fontSize: 13,
     fontFamily: F.regular,
     color: COLORS.textMuted,
     letterSpacing: 0,
     marginTop: 8,
   },
   gridCardModel: {
-    fontSize: 15,
+    fontSize: 16,
+    lineHeight: 19,
     fontFamily: F.semibold,
     color: COLORS.textPrimary,
     marginTop: 2,
     letterSpacing: 0,
   },
   gridCardPrice: {
-    fontSize: 14,
-    fontFamily: F.bold,
+    fontSize: 15,
+    fontFamily: F.semibold,
     color: COLORS.textPrimary,
     marginTop: 3,
   },

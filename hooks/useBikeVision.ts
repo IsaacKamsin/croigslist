@@ -54,14 +54,27 @@ function isDataUrl(value: string) {
   return /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(value);
 }
 
+function isSupportedImageDataUrl(value: string) {
+  return /^data:image\/(png|jpe?g|gif|webp);base64,/i.test(value);
+}
+
 async function imageToDataUrl(uri: string): Promise<string> {
-  if (isDataUrl(uri)) return uri;
+  if (isDataUrl(uri)) {
+    if (!isSupportedImageDataUrl(uri)) {
+      throw new Error("Bike analysis supports PNG, JPEG, GIF, or WebP images.");
+    }
+    return uri;
+  }
 
   if (uri.startsWith("file://") || uri.startsWith("ph://")) {
     const base64 = await FileSystem.readAsStringAsync(uri, {
       encoding: "base64",
     });
-    return `data:${mimeTypeForUri(uri)};base64,${base64}`;
+    const imageDataUrl = `data:${mimeTypeForUri(uri)};base64,${base64}`;
+    if (!isSupportedImageDataUrl(imageDataUrl)) {
+      throw new Error("Bike analysis supports PNG, JPEG, GIF, or WebP images.");
+    }
+    return imageDataUrl;
   }
 
   const response = await fetch(uri);
@@ -76,7 +89,11 @@ async function imageToDataUrl(uri: string): Promise<string> {
   const bytes = new Uint8Array(buffer);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return `data:${contentType};base64,${btoa(binary)}`;
+  const imageDataUrl = `data:${contentType};base64,${btoa(binary)}`;
+  if (!isSupportedImageDataUrl(imageDataUrl)) {
+    throw new Error("Bike analysis supports PNG, JPEG, GIF, or WebP images.");
+  }
+  return imageDataUrl;
 }
 
 async function invokeBikeVision(imageDataUrl: string) {

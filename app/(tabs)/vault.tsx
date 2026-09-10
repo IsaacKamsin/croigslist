@@ -14,10 +14,9 @@ import {
 } from "@/components/ui/primitives";
 import { ScreenHeader } from "@/components/ScreenHeader";
 import { useAuth } from "@/context/AuthContext";
-import { LinearGradient } from "expo-linear-gradient";
 import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from "@/hooks/useHaptics";
 import { S } from "@/constants/styles";
-import { COLORS, F, IMAGE_CACHE, SPACING, TYPE } from "@/constants/design";
+import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { formatUsd } from "@/lib/formatters";
 import { useBikeVision } from "@/hooks/useBikeVision";
 import {
@@ -28,6 +27,7 @@ import {
   updateGarageBikeAnalysis,
 } from "@/lib/garage-db";
 import { fetchListings } from "@/lib/registry-db";
+import { notifyMatchFound, notifyStrongMatch } from "@/lib/notification-events";
 import BottomSheet, {
   BottomSheetBackdrop,
   BottomSheetScrollView,
@@ -73,6 +73,7 @@ interface GarageBike {
   vibe?: string;
   confidence?: number;
   processing: boolean;
+  processingLabel?: "UPLOADING" | "IDENTIFYING";
   createdAt: Date;
 }
 
@@ -242,7 +243,7 @@ function PulsingDot() {
 }
 
 // ── Scan Line Animation ──────────────────────────────────────────────
-function ScanOverlay() {
+function ScanOverlay({ label = "IDENTIFYING" }: { label?: string }) {
   const scanY = useSharedValue(0);
 
   useEffect(() => {
@@ -262,7 +263,7 @@ function ScanOverlay() {
       <Animated.View style={[styles.scanLine, lineStyle]} />
       <View style={styles.scanLabelWrap}>
         <View style={styles.scanDot} />
-        <Text style={styles.processingLabel}>IDENTIFYING</Text>
+        <Text style={styles.processingLabel}>{label}</Text>
       </View>
     </View>
   );
@@ -290,7 +291,7 @@ function GarageBikeCard({
           <Image
             source={{ uri: bike.imageUri }}
             style={styles.cardImage}
-            contentFit="cover"
+            contentFit="contain"
             cachePolicy={IMAGE_CACHE}
             transition={200}
             onError={() => {
@@ -305,7 +306,7 @@ function GarageBikeCard({
             </Text>
           </View>
         )}
-        {bike.processing && <ScanOverlay />}
+        {bike.processing && <ScanOverlay label={bike.processingLabel} />}
         {!bike.processing && !failed && matchCount > 0 && (
           <AccentBadge
             style={styles.cardMatchBadge}
@@ -362,7 +363,7 @@ function GarageBikeCard({
         >
           <View style={styles.idBadgeRow}>
             <View style={styles.idBadge}>
-              <Text style={styles.idBadgeText}>IDENTIFIED</Text>
+              <Text style={styles.idBadgeText}>WATCHING</Text>
             </View>
             {bike.confidence != null && bike.confidence >= 0.8 && (
               <Text style={styles.confidenceText}>
@@ -390,9 +391,10 @@ function GarageBikeCard({
 // ── Main Screen ──────────────────────────────────────────────────────
 export default function GarageScreen() {
   const router = useRouter();
-  const { activeView } = useAuth();
+  const { activeView, member } = useAuth();
   const isBuilder = activeView === "builder";
   const [bikes, setBikes] = useState<GarageBike[]>([]);
+  const [isLoadingGarage, setIsLoadingGarage] = useState(true);
   const [matches, setMatches] = useState<Record<string, MatchListing[]>>({});
   const [selectedBike, setSelectedBike] = useState<GarageBike | null>(null);
   const [toastData, setToastData] = useState<{
@@ -401,17 +403,17 @@ export default function GarageScreen() {
     bikeId: string;
   } | null>(null);
   const sheetRef = useRef<BottomSheet>(null);
-  const snapPoints = useMemo(() => ["72%"], []);
+  const snapPoints = useMemo(() => ["56%", "82%"], []);
   const { analyze } = useBikeVision();
 
   const loadGarage = useCallback(async () => {
     try {
       const savedBikes = await fetchGarageBikes();
-      if (savedBikes.length > 0) {
-        setBikes(savedBikes);
-      }
+      setBikes(savedBikes);
     } catch {
       // Keep the local empty state if Supabase is not ready.
+    } finally {
+      setIsLoadingGarage(false);
     }
   }, []);
 
@@ -419,7 +421,7 @@ export default function GarageScreen() {
     loadGarage();
   }, [loadGarage]);
 
-  const handleUpload = async () => {
+  const handleUpload = async (replaceBike?: GarageBike) => {
     hapticMedium();
     console.log("🟡 [Vault] Upload started");
 
@@ -431,34 +433,79 @@ export default function GarageScreen() {
       quality: 0.8,
       base64: true,
       allowsMultipleSelection: false,
+      preferredAssetRepresentationMode:
+        ImagePicker.UIImagePickerPreferredAssetRepresentationMode.Compatible,
     });
 
     if (pickerResult.canceled || !pickerResult.assets?.[0]) return;
 
     const asset = pickerResult.assets[0];
     const imageUri = asset.uri;
-    const analysisImage =
-      asset.base64 && asset.mimeType
-        ? `data:${asset.mimeType};base64,${asset.base64}`
-        : imageUri;
-    const savedBike = await createGarageBike(
+    const imageData = asset.base64
+      ? { base64: asset.base64, mimeType: "image/jpeg" }
+      : undefined;
+    const analysisImage = imageData
+      ? `data:${imageData.mimeType};base64,${imageData.base64}`
+      : imageUri;
+    const tempBikeId = `uploading-${Date.now()}`;
+    const tempBike: GarageBike = {
+      id: replaceBike?.id ?? tempBikeId,
       imageUri,
-      asset.base64 && asset.mimeType
-        ? { base64: asset.base64, mimeType: asset.mimeType }
-        : undefined,
+      processing: true,
+      processingLabel: "UPLOADING",
+      createdAt: new Date(),
+    };
+
+    setBikes((prev) =>
+      replaceBike
+        ? prev.map((bike) => (bike.id === replaceBike.id ? tempBike : bike))
+        : [tempBike, ...prev],
     );
+
+    let savedBike: GarageBike | null = null;
+    try {
+      savedBike = await createGarageBike(
+        imageUri,
+        imageData,
+      );
+    } catch {
+      hapticWarning();
+      setBikes((prev) =>
+        prev.map((b) =>
+          b.id === tempBike.id
+            ? {
+                ...(replaceBike ?? b),
+                processing: false,
+                processingLabel: undefined,
+                brand: "UNIDENTIFIED",
+                model: replaceBike ? "Tap to choose a new photo" : "Upload failed",
+                condition: undefined,
+              }
+            : b,
+        ),
+      );
+      return;
+    }
+
     const newBike: GarageBike =
       savedBike
-        ? { ...savedBike, imageUri }
+        ? { ...savedBike, imageUri, processingLabel: "IDENTIFYING" }
         : {
             id: Date.now().toString(),
             imageUri,
             processing: true,
+            processingLabel: "IDENTIFYING",
             createdAt: new Date(),
           };
     const bikeId = newBike.id;
 
-    setBikes((prev) => [newBike, ...prev]);
+    if (replaceBike && savedBike) {
+      deleteGarageBike(replaceBike.id, replaceBike.imagePath).catch(() => undefined);
+    }
+
+    setBikes((prev) =>
+      prev.map((b) => (b.id === tempBike.id ? newBike : b)),
+    );
 
     const analysis = await analyze(analysisImage);
 
@@ -475,6 +522,7 @@ export default function GarageScreen() {
             ? {
                 ...b,
                 processing: false,
+                processingLabel: undefined,
                 brand,
                 model,
                 yearEstimate: analysis.baseBike.yearEstimate,
@@ -510,6 +558,18 @@ export default function GarageScreen() {
             bikeId,
           });
         }, 2000);
+        const bestMatch = listingMatches[0];
+        const notifyMatch = bestMatch.matchScore >= 90
+          ? notifyStrongMatch
+          : notifyMatchFound;
+        if (member?.id) {
+          notifyMatch({
+            userId: member.id,
+            listingId: bestMatch.id,
+            make: brand,
+            model,
+          }).catch(() => undefined);
+        }
       }
     } else {
       hapticWarning();
@@ -519,6 +579,7 @@ export default function GarageScreen() {
             ? {
                 ...b,
                 processing: false,
+                processingLabel: undefined,
                 brand: "UNIDENTIFIED",
                 model: "Tap to retry",
                 condition: undefined,
@@ -530,62 +591,11 @@ export default function GarageScreen() {
     }
   };
 
-  const retryAnalysis = async (bike: GarageBike) => {
-    setBikes((prev) =>
-      prev.map((b) => (b.id === bike.id ? { ...b, processing: true, brand: undefined, model: undefined } : b)),
-    );
-    const analysis = await analyze(bike.imageUri);
-    if (analysis) {
-      hapticSuccess();
-      const brand = analysis.baseBike.brand.toUpperCase();
-      const model = analysis.baseBike.model;
-      setBikes((prev) =>
-        prev.map((b) =>
-          b.id === bike.id
-            ? {
-                ...b,
-                processing: false,
-                brand,
-                model,
-                yearEstimate: analysis.baseBike.yearEstimate,
-                frameType: analysis.buildStyle,
-                color: analysis.colorScheme,
-                condition: analysis.overallCondition,
-                vibe: analysis.vibe,
-                confidence: analysis.confidence,
-              }
-            : b,
-        ),
-      );
-      await updateGarageBikeAnalysis(bike.id, {
-        brand,
-        model,
-        yearEstimate: analysis.baseBike.yearEstimate,
-        frameType: analysis.buildStyle,
-        color: analysis.colorScheme,
-        condition: analysis.overallCondition,
-        vibe: analysis.vibe,
-        confidence: analysis.confidence,
-        processing: false,
-      }).catch(() => undefined);
-    } else {
-      hapticWarning();
-      setBikes((prev) =>
-        prev.map((b) =>
-          b.id === bike.id
-            ? { ...b, processing: false, brand: "UNIDENTIFIED", model: "Tap to retry" }
-            : b,
-        ),
-      );
-      await markGarageBikeFailed(bike.id).catch(() => undefined);
-    }
-  };
-
   const removeBike = useCallback((bike: GarageBike) => {
     const bikeName = [bike.brand, bike.model].filter(Boolean).join(" ") || "this bike";
     Alert.alert(
       "Remove bike?",
-      `Remove ${bikeName} from your Dream Garage?`,
+      `Remove ${bikeName} from your saved bikes?`,
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -644,6 +654,9 @@ export default function GarageScreen() {
   );
 
   const selectedMatches = selectedBike ? (matches[selectedBike.id] ?? []) : [];
+  const selectedBikeName = selectedBike
+    ? [selectedBike.brand, selectedBike.model].filter(Boolean).join(" ")
+    : "";
   const savedBikes = bikes.filter((bike) => !isFailedBike(bike));
   const failedBikes = bikes.filter(isFailedBike);
   const hasBikes = bikes.length > 0;
@@ -654,7 +667,7 @@ export default function GarageScreen() {
         <ScreenHeader title="LISTINGS" />
         <View style={styles.sellerGuard}>
           <Text style={styles.sellerGuardEyebrow}>Seller workspace</Text>
-          <Text style={styles.sellerGuardTitle}>Garage is for buyers</Text>
+          <Text style={styles.sellerGuardTitle}>Saved bikes are for buyers</Text>
           <Text style={styles.sellerGuardBody}>
             Seller mode uses listings, not saved-bike matching. Manage inventory from Sell.
           </Text>
@@ -675,15 +688,33 @@ export default function GarageScreen() {
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
-        <ScreenHeader title="DREAM GARAGE" />
+        <ScreenHeader title="SAVED BIKES" />
 
-        {hasBikes && (
-          <PagePad style={{ marginTop: SPACING.xxl }}>
-            <Label>{`${savedBikes.length} DREAM BIKE${savedBikes.length === 1 ? "" : "S"}`}</Label>
+        {!isLoadingGarage && hasBikes && (
+          <PagePad style={styles.listHeader}>
+            <View>
+              <Label>{`${savedBikes.length} SAVED BIKE${savedBikes.length === 1 ? "" : "S"}`}</Label>
+              <BodySmall style={styles.listHeaderBody}>
+                Watching for matching listings.
+              </BodySmall>
+            </View>
+            <Pressable
+              style={({ pressed }) => [
+                styles.listAddButton,
+                pressed && styles.listAddButtonPressed,
+              ]}
+              onPress={() => handleUpload()}
+            >
+              <Text style={styles.listAddButtonText}>+ ADD</Text>
+            </Pressable>
           </PagePad>
         )}
 
-        {hasBikes ? (
+        {isLoadingGarage ? (
+          <PagePad style={styles.loadingSection}>
+            <Text style={styles.loadingLabel}>LOADING SAVED BIKES</Text>
+          </PagePad>
+        ) : hasBikes ? (
           <>
             {savedBikes.length > 0 && (
               <View style={styles.grid}>
@@ -706,9 +737,9 @@ export default function GarageScreen() {
               <PagePad style={styles.failedSection}>
                 <View style={styles.failedHeader}>
                   <View>
-                    <Label>{`${failedBikes.length} NEED RETRY`}</Label>
+                    <Label>{`${failedBikes.length} NEED${failedBikes.length === 1 ? "S" : ""} REVIEW`}</Label>
                     <BodySmall style={styles.failedBody}>
-                      Photo added. Identification failed.
+                      Tap a photo to identify it again.
                     </BodySmall>
                   </View>
                 </View>
@@ -719,7 +750,7 @@ export default function GarageScreen() {
                       bike={bike}
                       matchCount={0}
                       onPress={() => {
-                        if (!bike.processing) retryAnalysis(bike);
+                        if (!bike.processing) handleUpload(bike);
                       }}
                       onRemove={() => removeBike(bike)}
                     />
@@ -730,51 +761,34 @@ export default function GarageScreen() {
           </>
         ) : (
           <View style={styles.emptyWrap}>
-            <Image
-              source={{
-                uri: "https://images.unsplash.com/photo-1558981806-ec527fa84c39?w=900&q=80",
-              }}
-              style={styles.emptyImage}
-              contentFit="cover"
-              cachePolicy={IMAGE_CACHE}
-            />
-            <LinearGradient
-              colors={["transparent", COLORS.overlay85, COLORS.black]}
-              locations={[0.15, 0.5, 1]}
-              style={styles.emptyGradient}
-            >
-              <View style={styles.emptyContent}>
-                <Text style={styles.emptyLabel}>DREAM GARAGE EMPTY</Text>
-                <Text style={styles.emptyHeadline}>
-                  Build your{"\n"}dream garage.
-                </Text>
-                <Text style={styles.emptyBody}>
-                  Upload a bike photo. We will identify it and watch for matches.
-                </Text>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.emptyCta,
-                    pressed && styles.emptyCtaPressed,
-                  ]}
-                  onPress={handleUpload}
-                >
-                  <Text style={styles.emptyCtaText}>+ ADD PHOTO</Text>
-                </Pressable>
-              </View>
-            </LinearGradient>
+            <View style={styles.emptyImageWrap}>
+              <Image
+                source={require("@/assets/images/login/IMG_5142-hero.jpg")}
+                style={styles.emptyImage}
+                contentFit="cover"
+              />
+            </View>
+            <View style={styles.emptyContent}>
+              <Text style={styles.emptyLabel}>NO SAVED BIKES</Text>
+              <Text style={styles.emptyHeadline}>
+                Build your{"\n"}dream garage.
+              </Text>
+              <Text style={styles.emptyBody}>
+                Upload a bike photo. We will identify it and watch for matches.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [
+                  styles.emptyCta,
+                  pressed && styles.emptyCtaPressed,
+                ]}
+                onPress={() => handleUpload()}
+              >
+                <Text style={styles.emptyCtaText}>+ ADD PHOTO</Text>
+              </Pressable>
+            </View>
           </View>
         )}
       </ScrollView>
-
-      {/* Add button — only when the garage has bikes (empty state has its own CTA) */}
-      {hasBikes && (
-        <Pressable
-          style={({ pressed }) => [styles.fab, pressed && styles.fabPressed]}
-          onPress={handleUpload}
-        >
-          <Text style={styles.fabLabel}>+ ADD PHOTO</Text>
-        </Pressable>
-      )}
 
       {/* Match Toast */}
       {toastData && (
@@ -800,37 +814,47 @@ export default function GarageScreen() {
         handleIndicatorStyle={styles.handleIndicator}
         backgroundStyle={styles.sheetBg}
       >
-        <BottomSheetScrollView contentContainerStyle={{ paddingBottom: 48 }}>
+        <BottomSheetScrollView contentContainerStyle={styles.sheetContent}>
           {selectedBike && (
             <>
-              <PagePad>
-                <Row gap={SPACING.md} align="flex-start">
+              <PagePad style={styles.sheetSummary}>
+                <Row gap={SPACING.md} align="center">
                   <Image
                     source={{ uri: selectedBike.imageUri }}
                     style={styles.summaryImage}
-                    contentFit="cover"
+                    contentFit="contain"
                     cachePolicy={IMAGE_CACHE}
                   />
-                  <Stack gap={2} style={{ flex: 1, justifyContent: "center" }}>
-                    <Label>{selectedBike.brand ?? ""}</Label>
-                    <Text style={TYPE.sectionHeader}>{selectedBike.model}</Text>
-                    <Row
-                      wrap
-                      gap={SPACING.xs}
-                      style={{ marginTop: SPACING.sm }}
-                    >
+                  <Stack gap={6} style={styles.summaryCopy}>
+                    {!!selectedBike.brand && (
+                      <Text style={styles.summaryBrand} numberOfLines={1}>
+                        {selectedBike.brand}
+                      </Text>
+                    )}
+                    <Text style={styles.summaryTitle} numberOfLines={2}>
+                      {selectedBike.model}
+                    </Text>
+                    <Row wrap gap={SPACING.xs} style={styles.summaryTags}>
                       {selectedBike.frameType && (
-                        <Chip>{selectedBike.frameType.toUpperCase()}</Chip>
+                        <Chip style={styles.summaryChip}>
+                          {selectedBike.frameType.toUpperCase()}
+                        </Chip>
                       )}
                       {selectedBike.color && (
-                        <Chip>{selectedBike.color.toUpperCase()}</Chip>
+                        <Chip style={styles.summaryChip}>
+                          {selectedBike.color.toUpperCase()}
+                        </Chip>
                       )}
                       {selectedBike.condition && (
-                        <Chip>{selectedBike.condition.toUpperCase()}</Chip>
+                        <Chip style={styles.summaryChip}>
+                          {selectedBike.condition.toUpperCase()}
+                        </Chip>
                       )}
                     </Row>
                     {selectedBike.vibe && (
-                      <Text style={styles.vibeText}>{selectedBike.vibe}</Text>
+                      <Text style={styles.vibeText} numberOfLines={3}>
+                        {selectedBike.vibe}
+                      </Text>
                     )}
                   </Stack>
                 </Row>
@@ -844,7 +868,7 @@ export default function GarageScreen() {
               />
 
               <PagePad>
-                <Label style={{ marginBottom: SPACING.md }}>
+                <Label style={styles.matchesLabel}>
                   {selectedMatches.length > 0
                     ? `${selectedMatches.length} POTENTIAL MATCH${selectedMatches.length !== 1 ? "ES" : ""}`
                     : "NO MATCHES YET"}
@@ -862,17 +886,26 @@ export default function GarageScreen() {
                     />
                   ))
                 ) : (
-                  <Stack gap={SPACING.sm}>
-                    <LabelBold>WATCHING THE MARKET</LabelBold>
-                    <BodySmall style={{ maxWidth: 280 }}>
-                      We are scanning every new listing for this bike. When one
-                      surfaces, you will know before anyone else.
-                    </BodySmall>
-                    <Row gap={SPACING.sm} style={{ marginTop: SPACING.xs }}>
-                      <PulsingDot />
-                      <Text style={styles.watchingLabel}>ACTIVE</Text>
+                  <View style={styles.watchPanel}>
+                    <Row align="flex-start" gap={SPACING.md}>
+                      <View style={styles.watchIcon}>
+                        <PulsingDot />
+                      </View>
+                      <Stack gap={6} style={{ flex: 1 }}>
+                        <Row style={styles.watchHeader}>
+                          <LabelBold>WATCHING NEW LISTINGS</LabelBold>
+                          <View style={styles.watchingPill}>
+                            <Text style={styles.watchingLabel}>ACTIVE</Text>
+                          </View>
+                        </Row>
+                        <BodySmall style={styles.watchBody}>
+                          {selectedBikeName
+                            ? `We will notify you when a matching ${selectedBikeName} is listed.`
+                            : "We will notify you when a matching bike is listed."}
+                        </BodySmall>
+                      </Stack>
                     </Row>
-                  </Stack>
+                  </View>
                 )}
               </PagePad>
             </>
@@ -895,7 +928,7 @@ const styles = StyleSheet.create({
     marginTop: SPACING.xl,
     borderWidth: 1,
     borderColor: COLORS.divider,
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.surfaceRaised,
     padding: SPACING.lg,
   },
   sellerGuardEyebrow: {
@@ -934,30 +967,33 @@ const styles = StyleSheet.create({
   // Empty state
   emptyWrap: {
     flex: 1,
+    backgroundColor: COLORS.surface,
+  },
+  emptyImageWrap: {
+    width: "100%",
+    aspectRatio: 1,
+    backgroundColor: COLORS.surfaceRaised,
+    overflow: "hidden",
   },
   emptyImage: {
-    ...StyleSheet.absoluteFillObject,
     width: "100%",
     height: "100%",
   },
-  emptyGradient: {
-    ...StyleSheet.absoluteFillObject,
-    justifyContent: "flex-end",
-  },
   emptyContent: {
     paddingHorizontal: SPACING.page,
+    paddingTop: SPACING.xxl,
     paddingBottom: SPACING.xxl,
   },
   emptyLabel: {
     fontSize: 9,
     fontFamily: F.monoBold,
     letterSpacing: 2,
-    color: COLORS.whiteA50,
+    color: COLORS.textFaint,
   },
   emptyHeadline: {
     fontSize: 28,
     fontFamily: F.bold,
-    color: COLORS.white,
+    color: COLORS.textPrimary,
     letterSpacing: 0,
     lineHeight: 32,
     marginTop: SPACING.sm,
@@ -965,7 +1001,7 @@ const styles = StyleSheet.create({
   emptyBody: {
     fontSize: 14,
     fontFamily: F.regular,
-    color: COLORS.whiteA60,
+    color: COLORS.textSecondary,
     lineHeight: 21,
     marginTop: SPACING.md,
     maxWidth: 300,
@@ -984,6 +1020,43 @@ const styles = StyleSheet.create({
     fontFamily: F.monoBold,
     letterSpacing: 2,
     color: COLORS.black,
+  },
+  listHeader: {
+    marginTop: SPACING.xxl,
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: SPACING.md,
+  },
+  listHeaderBody: {
+    marginTop: SPACING.xs,
+    color: COLORS.textMuted,
+    lineHeight: 18,
+  },
+  loadingSection: {
+    paddingTop: SPACING.xxl,
+    minHeight: 360,
+  },
+  loadingLabel: {
+    fontSize: 11,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.6,
+    color: COLORS.textFaint,
+  },
+  listAddButton: {
+    backgroundColor: COLORS.black,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+  },
+  listAddButtonPressed: {
+    opacity: 0.82,
+  },
+  listAddButtonText: {
+    fontSize: 10,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.6,
+    color: COLORS.white,
   },
   grid: {
     flexDirection: "row",
@@ -1017,6 +1090,7 @@ const styles = StyleSheet.create({
     aspectRatio: 3 / 4,
     backgroundColor: COLORS.surface,
     overflow: "hidden",
+    borderRadius: 4,
   },
   cardImage: { width: "100%", height: "100%" },
   cardImageFallback: {
@@ -1037,16 +1111,16 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: SPACING.sm,
     right: SPACING.sm,
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    backgroundColor: COLORS.overlay75,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: COLORS.overlay50,
     alignItems: "center",
     justifyContent: "center",
   },
   cardRemoveText: {
-    fontSize: 20,
-    lineHeight: 22,
+    fontSize: 18,
+    lineHeight: 20,
     fontFamily: F.light,
     color: COLORS.white,
   },
@@ -1100,20 +1174,22 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   idBadge: {
-    backgroundColor: COLORS.accent,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+    backgroundColor: COLORS.surfaceRaised,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
   idBadgeText: {
     fontSize: 7,
     fontFamily: F.monoBold,
     letterSpacing: 1.5,
-    color: COLORS.black,
+    color: COLORS.textMuted,
   },
   retryBadge: {
-    backgroundColor: COLORS.accentAlt,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+    backgroundColor: COLORS.black,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
   },
   retryBadgeText: {
     fontSize: 7,
@@ -1252,15 +1328,82 @@ const styles = StyleSheet.create({
     color: COLORS.accent,
   },
   sheetBg: { backgroundColor: COLORS.bg },
+  sheetContent: {
+    paddingTop: SPACING.sm,
+    paddingBottom: 56,
+  },
   handleIndicator: { backgroundColor: COLORS.gray300, width: 36, height: 4 },
-  summaryImage: { width: 90, height: 120, backgroundColor: COLORS.surface },
-  vibeText: {
+  sheetSummary: {
+    paddingTop: SPACING.sm,
+  },
+  summaryImage: {
+    width: 138,
+    height: 112,
+    backgroundColor: COLORS.surfaceRaised,
+    borderRadius: 6,
+  },
+  summaryCopy: {
+    flex: 1,
+    justifyContent: "center",
+    minWidth: 0,
+  },
+  summaryBrand: {
     fontSize: 12,
-    fontFamily: F.regular,
-    fontStyle: "italic",
+    fontFamily: F.monoBold,
+    letterSpacing: 1.5,
     color: COLORS.textMuted,
-    marginTop: SPACING.sm,
-    lineHeight: 17,
+    textTransform: "uppercase",
+    lineHeight: 16,
+  },
+  summaryTitle: {
+    fontSize: 28,
+    fontFamily: F.bold,
+    letterSpacing: 0,
+    color: COLORS.textPrimary,
+    lineHeight: 32,
+  },
+  summaryTags: {
+    marginTop: 2,
+  },
+  summaryChip: {
+    backgroundColor: COLORS.bg,
+  },
+  vibeText: {
+    fontSize: 14,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    lineHeight: 19,
+  },
+  matchesLabel: {
+    marginBottom: SPACING.md,
+  },
+  watchPanel: {
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    backgroundColor: COLORS.surfaceRaised,
+    borderRadius: 8,
+    padding: SPACING.md,
+  },
+  watchIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    backgroundColor: COLORS.white,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  watchHeader: {
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: SPACING.sm,
+  },
+  watchBody: {
+    color: COLORS.textMuted,
+    lineHeight: 20,
+    maxWidth: 330,
   },
   matchCard: {
     flexDirection: "row",
@@ -1271,11 +1414,22 @@ const styles = StyleSheet.create({
     paddingBottom: SPACING.md,
   },
   matchImage: { width: 72, height: 72, backgroundColor: COLORS.surface },
-  watchingDot: { width: 6, height: 6, backgroundColor: COLORS.accent },
+  watchingDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: COLORS.active,
+  },
+  watchingPill: {
+    borderRadius: 999,
+    backgroundColor: COLORS.black,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
   watchingLabel: {
     fontSize: 9,
     fontFamily: F.monoBold,
-    letterSpacing: 2,
-    color: COLORS.accent,
+    letterSpacing: 1.8,
+    color: COLORS.white,
   },
 });

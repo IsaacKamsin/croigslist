@@ -1,6 +1,7 @@
 import { COLORS, F } from "@/constants/design";
 import { useAuth } from "@/context/AuthContext";
 import { hapticLight, hapticMedium } from "@/hooks/useHaptics";
+import { fetchGarageDetails } from "@/lib/garage-profile-db";
 import {
   BottomSheetBackdrop,
   BottomSheetModal,
@@ -8,30 +9,36 @@ import {
   type BottomSheetBackdropProps,
 } from "@gorhom/bottom-sheet";
 import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
+import { useQuery } from "@tanstack/react-query";
+import { Image } from "expo-image";
 import { Tabs } from "expo-router";
-import { ChatTextIcon, GarageIcon, HouseIcon, UserIcon, WrenchIcon } from "phosphor-react-native";
+import { ChatTextIcon, CurrencyDollarIcon, GarageIcon, HouseIcon, UsersIcon, UserIcon, WrenchIcon } from "phosphor-react-native";
 import { useCallback, useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 
-const ACTIVE_BG_W = 38;
-const ACTIVE_BG_H = 28;
-const ICON_SIZE = 30;
+const ACTIVE_BG_W = 34;
+const ACTIVE_BG_H = 26;
+const ICON_SIZE = 27;
 const ICON_WEIGHT = "bold" as const;
 
 const TAB_ICONS: Record<string, typeof HouseIcon> = {
   index: HouseIcon,
-  shops: WrenchIcon,
+  shops: UsersIcon,
   vault: GarageIcon,
   messages: ChatTextIcon,
   profile: UserIcon,
 };
 
 const BUILDER_TAB_ICONS: Record<string, typeof HouseIcon> = {
-  index: WrenchIcon,
+  index: CurrencyDollarIcon,
   shops: GarageIcon,
   vault: HouseIcon,
   messages: ChatTextIcon,
   profile: UserIcon,
+};
+
+export const unstable_settings = {
+  initialRouteName: "index",
 };
 
 function TabIcon({
@@ -39,14 +46,43 @@ function TabIcon({
   color,
   focused,
   isBuilder,
+  avatarUrl,
 }: {
   route: string;
   color: string;
   focused: boolean;
   isBuilder: boolean;
+  avatarUrl?: string;
 }) {
   const Icon = isBuilder ? BUILDER_TAB_ICONS[route] : TAB_ICONS[route];
   if (!Icon) return null;
+  const isProfile = route === "profile";
+
+  if (isProfile && avatarUrl) {
+    return (
+      <View
+        style={{
+          width: ACTIVE_BG_W,
+          height: ACTIVE_BG_H,
+          justifyContent: "center",
+          alignItems: "center",
+        }}
+      >
+        <Image
+          source={{ uri: avatarUrl }}
+          style={{
+            width: focused ? 28 : 26,
+            height: focused ? 28 : 26,
+            borderRadius: focused ? 14 : 13,
+            borderWidth: focused ? 2 : 0,
+            borderColor: isBuilder ? COLORS.white : COLORS.black,
+            backgroundColor: COLORS.gray300,
+          }}
+          contentFit="cover"
+        />
+      </View>
+    );
+  }
 
   if (focused) {
     return (
@@ -77,7 +113,7 @@ function ProfileTabButton(props: BottomTabBarButtonProps) {
   const switchTitle = switchTarget === "buyer" ? "Switch to Buy" : "Switch to Sell";
   const switchBody =
     switchTarget === "buyer"
-      ? "Browse listings, save bikes, and message builders."
+      ? "Browse listings, save bikes, and message sellers."
       : "Create listings, manage drafts, and respond to buyers.";
   const {
     accessibilityLabel,
@@ -123,7 +159,7 @@ function ProfileTabButton(props: BottomTabBarButtonProps) {
       accessibilityState={accessibilityState}
       style={style}
       testID={testID}
-      delayLongPress={1500}
+      delayLongPress={650}
       onPress={(event) => {
         if (openedSheetRef.current) {
           openedSheetRef.current = false;
@@ -176,39 +212,59 @@ function ProfileTabButton(props: BottomTabBarButtonProps) {
 }
 
 export default function TabsLayout() {
-  const { activeView } = useAuth();
+  const { activeView, member } = useAuth();
   const isBuilder = activeView === "builder";
+  const { data: garageDetails } = useQuery({
+    queryKey: ["garage-details"],
+    queryFn: fetchGarageDetails,
+    enabled: isBuilder,
+  });
+  const profileTabAvatarUrl = isBuilder
+    ? garageDetails?.garageImageUrl
+    : member?.avatarUrl;
 
   return (
     <Tabs
+      initialRouteName="index"
       screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
           backgroundColor: isBuilder ? COLORS.black : COLORS.bg,
           borderTopColor: COLORS.divider,
           borderTopWidth: 1,
-          height: 96,
-          paddingTop: 8,
+          height: 92,
+          paddingTop: 7,
           paddingBottom: 24,
         },
         tabBarActiveTintColor: isBuilder ? COLORS.white : COLORS.textPrimary,
         tabBarInactiveTintColor: isBuilder ? COLORS.whiteA35 : COLORS.textFaint,
         tabBarLabelStyle: {
-          fontFamily: F.bold,
-          fontSize: 13,
+          fontFamily: F.semibold,
+          fontSize: 11,
           letterSpacing: 0,
         },
         tabBarIcon: ({ color, focused }) => (
-          <TabIcon route={route.name} color={color} focused={focused} isBuilder={isBuilder} />
+          <TabIcon
+            route={route.name}
+            color={color}
+            focused={focused}
+            isBuilder={isBuilder}
+            avatarUrl={profileTabAvatarUrl}
+          />
         ),
       })}
       screenListeners={{
         tabPress: () => hapticLight(),
       }}
     >
-      <Tabs.Screen name="index" options={{ title: "HOME" }} />
+      <Tabs.Screen name="index" options={{ title: isBuilder ? "EARNINGS" : "HOME" }} />
       <Tabs.Screen name="search" options={{ href: null }} />
-      <Tabs.Screen name="shops" options={{ title: isBuilder ? "LISTINGS" : "BUILDERS" }} />
+      <Tabs.Screen
+        name="shops"
+        options={{
+          title: isBuilder ? "LISTINGS" : "BUILDERS",
+        }}
+      />
       <Tabs.Screen
         name="vault"
         options={{

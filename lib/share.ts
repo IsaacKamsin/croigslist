@@ -1,7 +1,7 @@
 import { Share } from "react-native";
 
 const APP_INVITE =
-  "Join Croigslist, a private motorcycle registry for real sellers and serious buyers.";
+  "Join Croigslist, a marketplace for real motorcycle sellers and serious buyers.";
 
 export async function shareSellerInvite() {
   await Share.share({
@@ -13,6 +13,6 @@ export async function shareSellerInvite() {
 export async function shareBuyerInvite() {
   await Share.share({
     title: "Join Croigslist",
-    message: `${APP_INVITE}\n\nFind builders, save bikes to your Dream Garage, and message sellers directly.`,
+    message: `${APP_INVITE}\n\nFind builders, save bikes, and message sellers directly.`,
   });
 }

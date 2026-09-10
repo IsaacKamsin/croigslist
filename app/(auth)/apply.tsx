@@ -11,6 +11,7 @@ import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
 const applySchema = z.object({
+  inviteCode: z.string().trim().min(4, 'Enter your invite code.'),
   email: z.string().trim().email('Enter a valid email address.'),
   password: z.string().min(6, 'Password must be at least 6 characters.'),
   type: z.enum(['buyer', 'builder']),
@@ -27,7 +28,7 @@ const MEMBER_TYPES: {
     value: 'buyer',
   },
   {
-    label: 'BUILDER',
+    label: 'SELLER',
     value: 'builder',
   },
 ];
@@ -45,7 +46,7 @@ export default function ApplyScreen() {
     formState: { errors, isSubmitting },
   } = useForm<ApplyForm>({
     resolver: zodResolver(applySchema),
-    defaultValues: { email: '', password: '', type: 'buyer' },
+    defaultValues: { inviteCode: '', email: '', password: '', type: 'buyer' },
   });
 
   const type = watch('type');
@@ -81,7 +82,8 @@ export default function ApplyScreen() {
               <Text style={styles.inboxEmail}>{pendingEmail}</Text>.
             </Text>
             <Text style={styles.inboxBody}>
-              Tap the link to verify your account, then come back and sign in.
+              Tap the link to verify your account, then come back and sign in to
+              start your 3-day trial.
             </Text>
           </View>
           <Pressable
@@ -121,7 +123,8 @@ export default function ApplyScreen() {
             </View>
             <Text style={styles.title}>Let us set up your account.</Text>
             <Text style={styles.description}>
-              Pick a view and create your login. Garage, city, and builder details come next.
+              Pick a view and create your login. Start with 3 days free, then
+              $100/year.
             </Text>
           </View>
 
@@ -149,9 +152,28 @@ export default function ApplyScreen() {
             </View>
             <Text style={styles.typeHint}>
               {type === 'builder'
-                ? 'Builder view starts with listings and shop tools.'
-                : 'Buyer view starts with search, saves, and Garage.'}
+                ? 'Seller view starts with listings and profile tools.'
+                : 'Buy view starts with search, saves, and profiles.'}
             </Text>
+
+            <View style={styles.field}>
+              <Text style={styles.label}>INVITE CODE</Text>
+              <Controller
+                control={control}
+                name="inviteCode"
+                render={({ field: { onChange, onBlur, value } }) => (
+                  <TextInput
+                    style={styles.input}
+                    value={value}
+                    onChangeText={(next) => onChange(next.trimStart())}
+                    onBlur={onBlur}
+                    placeholder="Enter code"
+                    placeholderTextColor={COLORS.textFaint}
+                    autoCapitalize="characters"
+                  />
+                )}
+              />
+            </View>
 
             <View style={styles.field}>
               <Text style={styles.label}>EMAIL</Text>
@@ -193,6 +215,7 @@ export default function ApplyScreen() {
             </View>
           </View>
 
+          {errors.inviteCode?.message && <Text style={styles.error}>{errors.inviteCode.message}</Text>}
           {errors.email?.message && <Text style={styles.error}>{errors.email.message}</Text>}
           {errors.password?.message && <Text style={styles.error}>{errors.password.message}</Text>}
           {errors.root?.message && <Text style={styles.error}>{errors.root.message}</Text>}
@@ -208,7 +231,7 @@ export default function ApplyScreen() {
           </Pressable>
 
           <Text style={styles.footnote}>
-            You can switch Buyer and Builder views anytime from Profile.
+            You can switch Buy and Sell views anytime from Profile.
           </Text>
         </ScrollView>
       </KeyboardAvoidingView>

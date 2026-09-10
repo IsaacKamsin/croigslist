@@ -1,17 +1,23 @@
 /**
  * Category listing screen — shows the full collection behind a registry
- * section's "SEE ALL" link (Just listed, Under $5K, Project bikes).
+ * section's "SEE ALL" link (Bikes, Just listed, Under $5K, Project bikes).
  */
-import { COLORS, F, IMAGE_CACHE, IMAGE_PLACEHOLDER, SPACING } from "@/constants/design";
+import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
-import { fetchRegistryData, type RegistryListing } from "@/lib/registry-db";
+import {
+  fetchRegistryData,
+  type RegistryData,
+  type RegistryListing,
+} from "@/lib/registry-db";
 import { formatUsd } from "@/lib/formatters";
 import { backOrReplace } from "@/lib/navigation";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
+import { CaretLeftIcon } from "phosphor-react-native";
 import { useMemo } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   Pressable,
   ScrollView,
@@ -24,14 +30,23 @@ import { SafeAreaView } from "react-native-safe-area-context";
 const SCREEN_W = Dimensions.get("window").width;
 const GAP = 12;
 const CARD_W = (SCREEN_W - SPACING.page * 2 - GAP) / 2;
+const EMPTY_LISTINGS: RegistryListing[] = [];
 
 type CategoryConfig = {
   title: string;
   sub: string;
-  dataKey: "justListed" | "under5k" | "projectBikes";
+  dataKey: keyof Pick<
+    RegistryData,
+    "bikesForSale" | "justListed" | "under5k" | "projectBikes"
+  >;
 };
 
 const CATEGORIES: Record<string, CategoryConfig> = {
+  bikes: {
+    title: "Bikes",
+    sub: "Fresh listings from builders and riders.",
+    dataKey: "bikesForSale",
+  },
   "just-listed": {
     title: "Just listed",
     sub: "Ink's still wet. First looks for members only.",
@@ -54,29 +69,34 @@ export default function CategoryScreen() {
   const router = useRouter();
 
   const config = CATEGORIES[key ?? ""];
-  const { data: items = [] } = useQuery({
+  const { data: items, isPending } = useQuery({
     queryKey: ["listing-category", config?.dataKey],
     queryFn: async () => {
       const data = await fetchRegistryData();
       return config ? data[config.dataKey] : [];
     },
     enabled: Boolean(config),
-    initialData: [] as RegistryListing[],
   });
+  const visibleItems = items ?? EMPTY_LISTINGS;
 
   const { left, right } = useMemo(() => {
     const l: RegistryListing[] = [];
     const r: RegistryListing[] = [];
-    items.forEach((item, i) => (i % 2 === 0 ? l : r).push(item));
+    visibleItems.forEach((item, i) => (i % 2 === 0 ? l : r).push(item));
     return { left: l, right: r };
-  }, [items]);
+  }, [visibleItems]);
 
   if (!config) {
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
         <View style={styles.header}>
-          <Pressable onPress={() => backOrReplace(router, "/(tabs)")} hitSlop={12}>
-            <Text style={styles.back}>← BACK</Text>
+          <Pressable
+            onPress={() => backOrReplace(router, "/(tabs)")}
+            hitSlop={12}
+            style={styles.backButton}
+          >
+            <CaretLeftIcon size={24} color={COLORS.textPrimary} weight="bold" />
+            <Text style={styles.back}>Back</Text>
           </Pressable>
         </View>
         <View style={styles.empty}>
@@ -90,8 +110,13 @@ export default function CategoryScreen() {
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
       <View style={styles.header}>
-        <Pressable onPress={() => backOrReplace(router, "/(tabs)")} hitSlop={12}>
-          <Text style={styles.back}>← BACK</Text>
+        <Pressable
+          onPress={() => backOrReplace(router, "/(tabs)")}
+          hitSlop={12}
+          style={styles.backButton}
+        >
+          <CaretLeftIcon size={24} color={COLORS.textPrimary} weight="bold" />
+          <Text style={styles.back}>Back</Text>
         </Pressable>
       </View>
       <View style={styles.divider} />
@@ -104,29 +129,42 @@ export default function CategoryScreen() {
         <View style={styles.titleBlock}>
           <Text style={styles.title}>{config.title}</Text>
           <Text style={styles.sub}>{config.sub}</Text>
-          <Text style={styles.count}>{items.length} LISTINGS</Text>
+          <Text style={styles.count}>
+            {isPending ? "LOADING" : `${visibleItems.length} LISTINGS`}
+          </Text>
         </View>
 
-        <View style={styles.grid}>
-          <View style={styles.col}>
-            {left.map((item) => (
-              <Card
-                key={item.id}
-                item={item}
-                onPress={() => router.push(`/listing/${item.id}`)}
-              />
-            ))}
+        {isPending ? (
+          <View style={styles.loading}>
+            <ActivityIndicator color={COLORS.textPrimary} />
           </View>
-          <View style={styles.col}>
-            {right.map((item) => (
-              <Card
-                key={item.id}
-                item={item}
-                onPress={() => router.push(`/listing/${item.id}`)}
-              />
-            ))}
+        ) : visibleItems.length > 0 ? (
+          <View style={styles.grid}>
+            <View style={styles.col}>
+              {left.map((item) => (
+                <Card
+                  key={item.id}
+                  item={item}
+                  onPress={() => router.push(`/listing/${item.id}`)}
+                />
+              ))}
+            </View>
+            <View style={styles.col}>
+              {right.map((item) => (
+                <Card
+                  key={item.id}
+                  item={item}
+                  onPress={() => router.push(`/listing/${item.id}`)}
+                />
+              ))}
+            </View>
           </View>
-        </View>
+        ) : (
+          <View style={styles.emptyCategory}>
+            <Text style={styles.emptyTitle}>Nothing here yet</Text>
+            <Text style={styles.emptyBody}>New listings will show up here as sellers post them.</Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -142,14 +180,19 @@ function Card({
   return (
     <Pressable style={styles.card} onPress={onPress}>
       <View style={styles.cardImgWrap}>
-        <Image
-          source={{ uri: item.image }}
-          style={styles.cardImg}
-          contentFit="cover"
-          cachePolicy={IMAGE_CACHE}
-          placeholder={IMAGE_PLACEHOLDER}
-          recyclingKey={item.image}
-        />
+        {item.image ? (
+          <Image
+            source={{ uri: item.image }}
+            style={styles.cardImg}
+            contentFit="cover"
+            cachePolicy={IMAGE_CACHE}
+            recyclingKey={item.image}
+          />
+        ) : (
+          <View style={styles.cardImageFallback}>
+            <Text style={styles.cardImageFallbackText}>NO PHOTO</Text>
+          </View>
+        )}
         {item.viewers > 0 && (
           <View style={styles.viewerBadge}>
             <View style={styles.viewerLed} />
@@ -175,10 +218,15 @@ const styles = StyleSheet.create({
     paddingTop: SPACING.md,
     paddingBottom: SPACING.md,
   },
+  backButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+  },
   back: {
-    fontSize: 10,
-    fontFamily: F.monoBold,
-    letterSpacing: 1.2,
+    fontSize: 17,
+    fontFamily: F.semibold,
+    letterSpacing: 0,
     color: COLORS.textPrimary,
   },
   divider: S.divider,
@@ -216,6 +264,13 @@ const styles = StyleSheet.create({
     gap: GAP,
   },
   col: { width: CARD_W, gap: GAP },
+  loading: {
+    paddingTop: SPACING.xl,
+  },
+  emptyCategory: {
+    paddingHorizontal: SPACING.page,
+    paddingTop: SPACING.xl,
+  },
 
   card: { width: CARD_W },
   cardImgWrap: {
@@ -225,6 +280,18 @@ const styles = StyleSheet.create({
     overflow: "hidden",
   },
   cardImg: { width: "100%", height: "100%" },
+  cardImageFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.surface,
+  },
+  cardImageFallbackText: {
+    fontSize: 9,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.2,
+    color: COLORS.textFaint,
+  },
   viewerBadge: {
     position: "absolute",
     top: 8,

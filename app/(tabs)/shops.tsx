@@ -1,189 +1,24 @@
+import { ListBikeSheet, type ListBikeSheetRef } from "@/components/ListBikeSheet";
 import { ScreenHeader } from "@/components/ScreenHeader";
+import { StatusState } from "@/components/StatusState";
+import { ProfileRails } from "@/components/registry/ProfileRails";
 import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
 import { useAuth } from "@/context/AuthContext";
 import { formatUsd } from "@/lib/formatters";
+import { fetchGarageDetails } from "@/lib/garage-profile-db";
 import {
-  fetchMyListings,
   fetchBuilders,
+  fetchMyListings,
   type RegistryListing,
   type RegistryShop,
 } from "@/lib/registry-db";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import { HeartIcon, MagnifyingGlassIcon } from "phosphor-react-native";
+import { useCallback, useRef } from "react";
 import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
-import { useCallback, useMemo, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
-
-type BuilderRailConfig = {
-  key: string;
-  title: string;
-  items: RegistryShop[];
-  emptyTitle: string;
-  emptyBody: string;
-};
-
-function shopSearchText(shop: RegistryShop) {
-  return [
-    shop.name,
-    shop.specialty,
-    shop.tagline,
-    shop.location,
-    shop.address,
-    ...(shop.badges ?? []),
-    ...(shop.buildStyles ?? []),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
-function shopMatches(shop: RegistryShop, terms: string[]) {
-  const searchText = shopSearchText(shop);
-  return terms.some((term) => searchText.includes(term));
-}
-
-function buildBuilderRails(shops: RegistryShop[]): BuilderRailConfig[] {
-  const verifiedShops = shops.filter((shop) => shop.verified);
-  const inventory = shops.filter((shop) => shop.builds > 0);
-  const newSellers = shops.slice(0, 8);
-  const minneapolis = shops.filter((shop) => shopMatches(shop, ["minneapolis"]));
-  const japanese = shops.filter((shop) =>
-    shopMatches(shop, ["japanese", "honda", "yamaha", "suzuki", "kawasaki"]),
-  );
-  const custom = shops.filter((shop) => shopMatches(shop, ["custom", "fabrication", "build"]));
-  const restoration = shops.filter((shop) =>
-    shopMatches(shop, ["restoration", "restore", "restored", "vintage"]),
-  );
-  const messageReady = shops.filter((shop) => shop.email || shop.phone || shop.website);
-
-  return [
-    {
-      key: "verified",
-      title: "Verified shops",
-      items: verifiedShops,
-      emptyTitle: "No verified shops yet",
-      emptyBody: "Approved shops will show up once their profiles are complete.",
-    },
-    {
-      key: "inventory",
-      title: "Shops with inventory",
-      items: inventory,
-      emptyTitle: "No bikes listed yet",
-      emptyBody: "Live shop inventory will fill this rail as listings go up.",
-    },
-    {
-      key: "new",
-      title: "New shops",
-      items: newSellers,
-      emptyTitle: "No shops yet",
-      emptyBody: "Recently joined shops will appear here.",
-    },
-    {
-      key: "minneapolis",
-      title: "Minneapolis shops",
-      items: minneapolis,
-      emptyTitle: "No Minneapolis shops yet",
-      emptyBody: "Local shops will appear here when their garage location is set.",
-    },
-    {
-      key: "japanese",
-      title: "Japanese classics",
-      items: japanese,
-      emptyTitle: "No Japanese classic specialists yet",
-      emptyBody: "Honda, Yamaha, Suzuki, and Kawasaki sellers will appear here.",
-    },
-    {
-      key: "custom",
-      title: "Custom builds",
-      items: custom,
-      emptyTitle: "No custom builders yet",
-      emptyBody: "Fabricators and one-off builders will appear here.",
-    },
-    {
-      key: "restoration",
-      title: "Restoration specialists",
-      items: restoration,
-      emptyTitle: "No restoration specialists yet",
-      emptyBody: "Vintage and restoration-focused garages will appear here.",
-    },
-    {
-      key: "message-ready",
-      title: "Contact-ready shops",
-      items: messageReady,
-      emptyTitle: "No contact-ready shops yet",
-      emptyBody: "Shops with phone, email, or website details will appear here.",
-    },
-  ];
-}
-
-function BuilderCard({
-  shop,
-  onPress,
-  isFavorite,
-  onToggleFavorite,
-}: {
-  shop: RegistryShop;
-  onPress: () => void;
-  isFavorite: boolean;
-  onToggleFavorite: () => void;
-}) {
-  const contactCount = [shop.email, shop.phone, shop.website].filter(Boolean).length;
-  const location = shop.location ?? shop.address ?? "Location not set";
-
-  return (
-    <Pressable style={styles.builderCard} onPress={onPress}>
-      <View style={styles.builderImageWrap}>
-        {shop.image ? (
-          <Image
-            source={{ uri: shop.image }}
-            style={styles.builderImage}
-            contentFit="cover"
-            cachePolicy={IMAGE_CACHE}
-            recyclingKey={shop.image}
-          />
-        ) : (
-          <View style={styles.profileImageFallback}>
-            <Text style={styles.profileImageInitial}>
-              {shop.name.slice(0, 1).toUpperCase()}
-            </Text>
-          </View>
-        )}
-        {shop.verified ? (
-          <View style={styles.favoriteBadge}>
-            <Text style={styles.favoriteBadgeText}>Verified</Text>
-          </View>
-        ) : null}
-        <Pressable
-          style={styles.favoriteButton}
-          onPress={(event) => {
-            event.stopPropagation();
-            onToggleFavorite();
-          }}
-          hitSlop={8}
-        >
-          <HeartIcon
-            color={COLORS.white}
-            size={24}
-            weight={isFavorite ? "fill" : "bold"}
-          />
-        </Pressable>
-      </View>
-      <Text style={styles.builderName} numberOfLines={2}>{shop.name}</Text>
-      <Text style={styles.builderMeta} numberOfLines={1}>
-        {shop.specialty}
-      </Text>
-      <Text style={styles.builderSub} numberOfLines={1}>
-        {location}
-      </Text>
-      <Text style={styles.builderSignal}>
-        {shop.builds} listings · {contactCount > 0 ? "contact ready" : "message only"}
-      </Text>
-    </Pressable>
-  );
-}
 
 function ListingCard({
   listing,
@@ -222,65 +57,75 @@ function ListingCard({
 }
 
 type ShopScreenRow =
-  | { kind: "listing"; id: string; listing: RegistryListing }
-  | { kind: "shop"; id: string; shop: RegistryShop };
+  { kind: "listing"; id: string; listing: RegistryListing };
 
 export default function ShopsScreen() {
   const router = useRouter();
-  const { activeView } = useAuth();
-  const [favoriteShopIds, setFavoriteShopIds] = useState<Set<string>>(() => new Set());
+  const { activeView, member, memberStatus, setActiveView } = useAuth();
   const isBuilder = activeView === "builder";
-  const { data, isRefetching, refetch } = useQuery({
+  const listBikeSheetRef = useRef<ListBikeSheetRef>(null);
+
+  const { data, isPending, isRefetching, refetch } = useQuery({
     queryKey: ["shops-tab", activeView],
     queryFn: async () => {
       if (isBuilder) {
-        return { listings: await fetchMyListings(), shops: [] as RegistryShop[] };
+        return {
+          listings: await fetchMyListings(),
+          profiles: [] as RegistryShop[],
+          garageDetails: await fetchGarageDetails().catch(() => null),
+        };
       }
-      return { listings: [] as RegistryListing[], shops: await fetchBuilders() };
+      const [profiles, listings, garageDetails] = await Promise.all([
+        fetchBuilders(),
+        fetchMyListings().catch(() => [] as RegistryListing[]),
+        fetchGarageDetails().catch(() => null),
+      ]);
+      return { listings, profiles, garageDetails };
     },
-    initialData: { listings: [] as RegistryListing[], shops: [] as RegistryShop[] },
   });
 
-  const listings = data.listings;
-  const shops = data.shops;
-  const shopProfiles = useMemo(
-    () => shops.filter((shop) => shop.kind !== "profile"),
-    [shops],
+  const listings = data?.listings ?? [];
+  const profiles = data?.profiles ?? [];
+  const hasSellerAccount = Boolean(
+    memberStatus === "approved" ||
+      member?.type === "builder" ||
+      listings.length > 0 ||
+      data?.garageDetails?.garageName?.trim(),
   );
-  const builderRails = useMemo(() => buildBuilderRails(shopProfiles), [shopProfiles]);
-  const favoriteShops = useMemo(
-    () => shopProfiles.filter((shop) => favoriteShopIds.has(shop.id)),
-    [favoriteShopIds, shopProfiles],
-  );
-  const toggleFavoriteShop = useCallback((id: string) => {
-    setFavoriteShopIds((current) => {
-      const next = new Set(current);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
+  const openListBikeSheet = useCallback(() => {
+    listBikeSheetRef.current?.open();
   }, []);
+  const openSellerDashboard = useCallback(() => {
+    setActiveView("builder");
+    router.replace("/(tabs)");
+  }, [router, setActiveView]);
   const rows: ShopScreenRow[] = isBuilder
     ? listings.map((listing) => ({
         kind: "listing" as const,
         id: listing.id,
         listing,
       }))
-    : shopProfiles.map((shop) => ({ kind: "shop" as const, id: shop.id, shop }));
+    : [];
 
   if (!isBuilder) {
-    const openShop = (shop: RegistryShop) => {
-      router.push(`/shop/${shop.slug}`);
-    };
-
     return (
       <SafeAreaView style={styles.container} edges={["top"]}>
+        <ScreenHeader
+          title="BUILDERS"
+          right={
+            <Pressable
+              style={styles.headerAction}
+              onPress={openListBikeSheet}
+              accessibilityRole="button"
+              accessibilityLabel="Sell a bike"
+            >
+              <Text style={styles.headerActionText}>SELL</Text>
+            </Pressable>
+          }
+        />
         <ScrollView
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.marketContent}
+          contentContainerStyle={styles.profileContent}
           refreshControl={
             <RefreshControl
               refreshing={isRefetching}
@@ -289,39 +134,44 @@ export default function ShopsScreen() {
             />
           }
         >
-          <Pressable
-            style={styles.searchPill}
-            onPress={() => router.push("/(tabs)/search")}
-          >
-            <MagnifyingGlassIcon size={16} color={COLORS.textPrimary} weight="bold" />
-            <Text style={styles.searchPillText}>Search builders or bikes</Text>
-          </Pressable>
-
-          {favoriteShops.length > 0 ? (
-            <BuilderSection
-              title="Fave shops"
-              items={favoriteShops}
-              emptyTitle="No favorites yet"
-              emptyBody="Tap the heart on a shop to save it here."
-              favoriteShopIds={favoriteShopIds}
-              onToggleFavorite={toggleFavoriteShop}
-              onPress={openShop}
+          {isPending ? (
+            <View style={styles.profileState}>
+              <StatusState
+                eyebrow="Loading"
+                title="Opening builders"
+                body="Builder profiles are loading."
+              />
+            </View>
+          ) : profiles.length > 0 ? (
+            <ProfileRails
+              profiles={profiles}
+              onOpenProfile={(profile) => {
+                router.push(profile.kind === "profile" ? `/builder/${profile.slug}` : `/shop/${profile.slug}`);
+              }}
+              onOpenRail={(query) => {
+                router.push({
+                  pathname: "/(tabs)/search",
+                  params: { q: query },
+                });
+              }}
             />
-          ) : null}
-
-          {builderRails.map((rail) => (
-            <BuilderSection
-              key={rail.key}
-              title={rail.title}
-              items={rail.items}
-              emptyTitle={rail.emptyTitle}
-              emptyBody={rail.emptyBody}
-              favoriteShopIds={favoriteShopIds}
-              onToggleFavorite={toggleFavoriteShop}
-              onPress={openShop}
-            />
-          ))}
+          ) : (
+            <View style={styles.profileState}>
+              <StatusState
+                eyebrow="Builders"
+                title="No builders yet"
+                body="Builders will appear here after sellers list bikes. Start by listing yours."
+                actionLabel="SELL A BIKE"
+                onAction={openListBikeSheet}
+              />
+            </View>
+          )}
         </ScrollView>
+        <ListBikeSheet
+          ref={listBikeSheetRef}
+          showDashboardOption={hasSellerAccount}
+          onOpenDashboard={openSellerDashboard}
+        />
       </SafeAreaView>
     );
   }
@@ -351,114 +201,67 @@ export default function ShopsScreen() {
                   Active, sold, and draft bikes tied to your seller account.
                 </Text>
               </View>
-              <Pressable style={styles.addButton} onPress={() => router.push("/listing/create")}>
+              <Pressable style={styles.addButton} onPress={openListBikeSheet}>
                 <Text style={styles.addButtonText}>+ LIST</Text>
               </Pressable>
             </View>
           </>
         }
         ListEmptyComponent={
-          <View style={styles.empty}>
+          isPending ? null : <View style={styles.empty}>
             <Text style={styles.emptyTitle}>No listings yet</Text>
             <Text style={styles.emptyBody}>
               Create a listing when a bike is ready for buyers to see.
             </Text>
-            <Pressable style={styles.emptyButton} onPress={() => router.push("/listing/create")}>
+            <Pressable style={styles.emptyButton} onPress={openListBikeSheet}>
               <Text style={styles.emptyButtonText}>LIST YOUR FIRST BIKE</Text>
             </Pressable>
           </View>
         }
-        renderItem={({ item }) =>
-          item.kind === "listing" ? (
-            <ListingCard
-              listing={item.listing}
-              onPress={() => router.push(`/listing/${item.id}`)}
-            />
-          ) : (
-            null
-          )
-        }
+        renderItem={({ item }) => (
+          <ListingCard
+            listing={item.listing}
+            onPress={() => router.push(`/listing/${item.id}`)}
+          />
+        )}
+      />
+      <ListBikeSheet
+        ref={listBikeSheetRef}
+        showDashboardOption
+        onOpenDashboard={openSellerDashboard}
       />
     </SafeAreaView>
   );
 }
 
-function BuilderSection({
-  title,
-  items,
-  emptyTitle,
-  emptyBody,
-  favoriteShopIds,
-  onToggleFavorite,
-  onPress,
-}: {
-  title: string;
-  items: RegistryShop[];
-  emptyTitle: string;
-  emptyBody: string;
-  favoriteShopIds: Set<string>;
-  onToggleFavorite: (id: string) => void;
-  onPress: (shop: RegistryShop) => void;
-}) {
-  return (
-    <View style={styles.builderSection}>
-      <Text style={styles.builderSectionTitle}>{title} ›</Text>
-      {items.length > 0 ? (
-        <FlatList
-          horizontal
-          data={items}
-          keyExtractor={(item) => item.id}
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.builderRail}
-          renderItem={({ item }) => (
-            <BuilderCard
-              shop={item}
-              isFavorite={favoriteShopIds.has(item.id)}
-              onToggleFavorite={() => onToggleFavorite(item.id)}
-              onPress={() => onPress(item)}
-            />
-          )}
-        />
-      ) : (
-        <View style={styles.railEmpty}>
-          <Text style={styles.railEmptyTitle}>{emptyTitle}</Text>
-          <Text style={styles.railEmptyBody}>{emptyBody}</Text>
-        </View>
-      )}
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   container: S.screenContainer,
-  header: S.screenHeader,
-  title: S.screenTitle,
-  divider: S.divider,
   list: {
     paddingHorizontal: SPACING.page,
     paddingTop: SPACING.md,
     paddingBottom: SPACING.xxl,
   },
-  marketContent: {
-    paddingTop: SPACING.md,
+  profileContent: {
     paddingBottom: SPACING.xxl,
   },
-  searchPill: {
-    marginHorizontal: SPACING.page,
-    minHeight: 58,
-    backgroundColor: COLORS.white,
-    borderWidth: 1.5,
-    borderColor: COLORS.gray300,
-    borderRadius: 29,
-    paddingHorizontal: SPACING.lg,
-    flexDirection: "row",
+  profileState: {
+    minHeight: 360,
+  },
+  headerAction: {
+    minHeight: 32,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    gap: SPACING.sm,
+    paddingHorizontal: 10,
+    backgroundColor: COLORS.white,
   },
-  searchPillText: {
-    fontSize: 17,
-    fontFamily: F.semibold,
+  headerActionText: {
+    fontSize: 9,
+    lineHeight: 12,
+    fontFamily: F.monoBold,
+    letterSpacing: 0.8,
     color: COLORS.textPrimary,
   },
   subtitle: {
@@ -524,125 +327,6 @@ const styles = StyleSheet.create({
     fontFamily: F.bold,
     letterSpacing: 0,
     color: COLORS.white,
-  },
-
-  profileImageFallback: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: COLORS.surface,
-  },
-  profileImageInitial: {
-    fontSize: 24,
-    fontFamily: F.bold,
-    color: COLORS.black,
-  },
-  builderSection: {
-    paddingTop: SPACING.xl,
-  },
-  builderSectionTitle: {
-    fontSize: 20,
-    fontFamily: F.bold,
-    color: COLORS.textPrimary,
-    paddingHorizontal: SPACING.page,
-    marginBottom: SPACING.md,
-  },
-  builderRail: {
-    paddingHorizontal: SPACING.page,
-    gap: SPACING.md,
-  },
-  railEmpty: {
-    marginHorizontal: SPACING.page,
-    minHeight: 118,
-    borderWidth: 1,
-    borderColor: COLORS.divider,
-    backgroundColor: COLORS.surface,
-    justifyContent: "center",
-    padding: SPACING.lg,
-  },
-  railEmptyTitle: {
-    fontSize: 18,
-    fontFamily: F.bold,
-    color: COLORS.textPrimary,
-  },
-  railEmptyBody: {
-    fontSize: 13,
-    fontFamily: F.regular,
-    color: COLORS.textSecondary,
-    lineHeight: 18,
-    marginTop: SPACING.xs,
-  },
-  builderCard: {
-    width: 156,
-    marginRight: SPACING.md,
-  },
-  builderImageWrap: {
-    width: "100%",
-    aspectRatio: 1,
-    backgroundColor: COLORS.surface,
-    borderRadius: 8,
-    overflow: "hidden",
-  },
-  builderImage: {
-    width: "100%",
-    height: "100%",
-  },
-  favoriteBadge: {
-    position: "absolute",
-    top: 10,
-    left: 10,
-    backgroundColor: COLORS.white,
-    borderRadius: 16,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    shadowColor: COLORS.black,
-    shadowOpacity: 0.14,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  favoriteBadgeText: {
-    fontSize: 12,
-    fontFamily: F.bold,
-    color: COLORS.textPrimary,
-  },
-  favoriteButton: {
-    position: "absolute",
-    right: 8,
-    bottom: 8,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: COLORS.overlay35,
-    alignItems: "center",
-    justifyContent: "center",
-    borderWidth: 1,
-    borderColor: COLORS.whiteA50,
-  },
-  builderName: {
-    fontSize: 16,
-    fontFamily: F.bold,
-    color: COLORS.textPrimary,
-    lineHeight: 18,
-    marginTop: SPACING.sm,
-  },
-  builderMeta: {
-    fontSize: 14,
-    fontFamily: F.regular,
-    color: COLORS.textSecondary,
-    marginTop: 2,
-  },
-  builderSub: {
-    fontSize: 13,
-    fontFamily: F.regular,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  builderSignal: {
-    fontSize: 12,
-    fontFamily: F.semibold,
-    color: COLORS.textMuted,
-    letterSpacing: 0.4,
-    marginTop: 5,
   },
   listingCard: {
     borderWidth: 0,

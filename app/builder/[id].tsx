@@ -1,21 +1,13 @@
 import { StatusState } from "@/components/StatusState";
 import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
+import { formatUsd } from "@/lib/formatters";
 import { startConversation } from "@/lib/messages-db";
 import { backOrReplace } from "@/lib/navigation";
 import { fetchBuilderProfile, type RegistryListing } from "@/lib/registry-db";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
-import {
-  EnvelopeIcon,
-  ListIcon,
-  MagnifyingGlassIcon,
-  ShoppingBagIcon,
-  SlidersHorizontalIcon,
-  StarIcon,
-} from "phosphor-react-native";
-import { useState } from "react";
 import {
   Dimensions,
   Pressable,
@@ -26,10 +18,10 @@ import {
 } from "react-native";
 
 const { width } = Dimensions.get("window");
-const GRID_GAP = 6;
-const CARD_WIDTH = (width - SPACING.page * 2 - GRID_GAP * 2) / 3;
+const GRID_GAP = 14;
+const CARD_WIDTH = (width - SPACING.page * 2 - GRID_GAP) / 2;
 
-type BuilderProfile = {
+type SellerProfile = {
   id: string;
   name: string;
   type: string;
@@ -46,17 +38,16 @@ type BuilderProfile = {
 export default function BuilderProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<"shop" | "likes">("shop");
   const { data: builder, isPending } = useQuery({
     queryKey: ["builder-profile", id],
-    queryFn: () => fetchBuilderProfile(id) as Promise<BuilderProfile | null>,
+    queryFn: () => fetchBuilderProfile(id) as Promise<SellerProfile | null>,
     enabled: Boolean(id),
   });
 
   if (isPending) {
     return (
       <View style={styles.container}>
-        <StatusState eyebrow="Loading" title="Opening builder profile" />
+        <StatusState eyebrow="Loading" title="Opening seller profile" />
       </View>
     );
   }
@@ -66,7 +57,7 @@ export default function BuilderProfileScreen() {
       <View style={styles.container}>
         <StatusState
           eyebrow="Not found"
-          title="Builder profile unavailable"
+          title="Seller profile unavailable"
           body="This seller may have changed their profile or removed their listings."
           actionLabel="GO BACK"
           onAction={() => backOrReplace(router, "/(tabs)")}
@@ -90,27 +81,9 @@ export default function BuilderProfileScreen() {
   };
   const activeListings = builder.listings.filter((item) => item.status !== "sold");
   const soldListings = builder.listings.filter((item) => item.status === "sold");
-  const soldCount = Math.max(soldListings.length, builder.listings.length ? 54 : 0);
-  const followers = Math.max(71, builder.listings.length * 12 + Number(builder.verified) * 23);
-  const following = Math.max(107, builder.listings.length * 8 + 75);
 
   return (
     <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
-      <View style={styles.topBar}>
-        <Pressable style={styles.iconButton} onPress={() => backOrReplace(router, "/(tabs)/shops")}>
-          <ListIcon size={28} color={COLORS.textPrimary} weight="bold" />
-        </Pressable>
-        <Text style={styles.logo}>croigslist</Text>
-        <View style={styles.topActions}>
-          <Pressable style={styles.iconButton} onPress={() => router.push("/(tabs)/search")}>
-            <MagnifyingGlassIcon size={25} color={COLORS.textPrimary} weight="bold" />
-          </Pressable>
-          <Pressable style={styles.iconButton} onPress={() => router.push("/listing/create")}>
-            <ShoppingBagIcon size={25} color={COLORS.textPrimary} weight="bold" />
-          </Pressable>
-        </View>
-      </View>
-
       <View style={styles.profileBlock}>
         <View style={styles.profileTop}>
           <View style={styles.avatar}>
@@ -118,125 +91,83 @@ export default function BuilderProfileScreen() {
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.name}>{builder.name}</Text>
-            <View style={styles.starsRow}>
-              {[0, 1, 2, 3, 4].map((star) => (
-                <StarIcon
-                  key={star}
-                  size={15}
-                  color={COLORS.textPrimary}
-                  weight={builder.verified ? "fill" : "regular"}
-                />
-              ))}
-              <Text style={styles.reviewCount}>(12)</Text>
-            </View>
+            {builder.verified ? (
+              <Text style={styles.verifiedLine}>Verified seller</Text>
+            ) : null}
+            {builder.memberSince ? (
+              <Text style={styles.memberLine}>Member since: {builder.memberSince}</Text>
+            ) : null}
             <Text style={styles.activityLine}>
-              {soldCount} sold · Active over a week ago
+              {activeListings.length} active · {soldListings.length} sold
             </Text>
           </View>
         </View>
 
         <View style={styles.statsActionRow}>
           <View style={styles.stat}>
-            <Text style={styles.statValue}>{followers}</Text>
-            <Text style={styles.statLabel}>Followers</Text>
+            <Text style={styles.statValue}>{activeListings.length}</Text>
+            <Text style={styles.statLabel}>Active</Text>
           </View>
           <View style={styles.stat}>
-            <Text style={styles.statValue}>{following}</Text>
-            <Text style={styles.statLabel}>Following</Text>
+            <Text style={styles.statValue}>{soldListings.length}</Text>
+            <Text style={styles.statLabel}>Sold</Text>
           </View>
-          <Pressable style={styles.followButton}>
-            <Text style={styles.followButtonText}>Follow</Text>
-          </Pressable>
-          <Pressable style={styles.messageButton} onPress={handleMessage}>
-            <EnvelopeIcon size={25} color={COLORS.textPrimary} weight="bold" />
+          <Pressable style={styles.contactButton} onPress={handleMessage}>
+            <Text style={styles.contactButtonText}>Message seller</Text>
           </Pressable>
         </View>
 
-        <Text style={styles.shopTitle}>
-          {builder.name.toLowerCase().includes("shop") ? builder.name : `${builder.name}'s shop`}
-        </Text>
+        <Text style={styles.shopTitle}>Seller profile</Text>
         {builder.bio ? (
           <Text style={styles.bio} numberOfLines={3}>{builder.bio}</Text>
         ) : (
           <Text style={styles.bio} numberOfLines={3}>
-            Bikes, parts, and builds from {builder.city || "this seller"}. Message for details, trades, or bundles.
+            Bikes and builds from {builder.city || "this seller"}. Message for details, trades, or bundles.
           </Text>
         )}
       </View>
 
-      <View style={styles.tabs}>
-        <Pressable
-          style={[styles.tab, activeTab === "shop" && styles.tabActive]}
-          onPress={() => setActiveTab("shop")}
-        >
-          <Text style={[styles.tabText, activeTab === "shop" && styles.tabTextActive]}>
-            Shop
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.tab, activeTab === "likes" && styles.tabActive]}
-          onPress={() => setActiveTab("likes")}
-        >
-          <Text style={[styles.tabText, activeTab === "likes" && styles.tabTextActive]}>
-            Likes
-          </Text>
-        </Pressable>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Listings</Text>
       </View>
 
-      {activeTab === "shop" ? (
-        <>
-          <View style={styles.filterRow}>
-            <Pressable style={styles.roundFilter}>
-              <SlidersHorizontalIcon size={19} color={COLORS.textPrimary} weight="bold" />
-            </Pressable>
-            <Pressable style={styles.sortPill}>
-              <Text style={styles.sortPillText}>Sort by</Text>
+      <View style={styles.grid}>
+        {activeListings.length === 0 ? (
+          <View style={styles.emptyListings}>
+            <Text style={styles.emptyListingsTitle}>No listings yet</Text>
+            <Text style={styles.emptyListingsBody}>
+              Message the seller or check back after they publish.
+            </Text>
+            <Pressable style={styles.emptyListingsButton} onPress={handleMessage}>
+              <Text style={styles.emptyListingsButtonText}>Message seller</Text>
             </Pressable>
           </View>
+        ) : (
+          activeListings.map((item) => (
+            <BuilderGridItem
+              key={item.id}
+              item={item}
+              onPress={() => router.push(`/listing/${item.id}`)}
+            />
+          ))
+        )}
+      </View>
 
+      {soldListings.length > 0 ? (
+        <View style={styles.soldSection}>
+          <Text style={styles.soldTitle}>Sold listings</Text>
           <View style={styles.grid}>
-            {activeListings.length === 0 ? (
-              <View style={styles.emptyListings}>
-                <Text style={styles.emptyListingsTitle}>No items listed yet</Text>
-                <Text style={styles.emptyListingsBody}>
-                  Message the seller or check back after they publish.
-                </Text>
-              </View>
-            ) : (
-              activeListings.map((item) => (
-                <BuilderGridItem
-                  key={item.id}
-                  item={item}
-                  onPress={() => router.push(`/listing/${item.id}`)}
-                />
-              ))
-            )}
+            {soldListings.map((item) => (
+              <BuilderGridItem
+                key={item.id}
+                item={item}
+                sold
+                onPress={() => router.push(`/listing/${item.id}`)}
+              />
+            ))}
           </View>
-
-          {soldListings.length > 0 ? (
-            <View style={styles.soldSection}>
-              <Text style={styles.soldTitle}>Sold items</Text>
-              <View style={styles.grid}>
-                {soldListings.map((item) => (
-                  <BuilderGridItem
-                    key={item.id}
-                    item={item}
-                    sold
-                    onPress={() => router.push(`/listing/${item.id}`)}
-                  />
-                ))}
-              </View>
-            </View>
-          ) : null}
-        </>
-      ) : (
-        <View style={styles.likesEmpty}>
-          <Text style={styles.emptyListingsTitle}>No public likes yet</Text>
-          <Text style={styles.emptyListingsBody}>
-            Saved bikes and parts will appear here when this seller makes them public.
-          </Text>
         </View>
-      )}
+      ) : null}
 
       <View style={{ height: 44 }} />
     </ScrollView>
@@ -252,19 +183,41 @@ function BuilderGridItem({
   sold?: boolean;
   onPress: () => void;
 }) {
+  const details = [item.mileage, item.city].filter(Boolean).join(" · ");
+
   return (
     <Pressable style={styles.card} onPress={onPress}>
-      <Image
-        source={{ uri: item.image }}
-        style={styles.cardImage}
-        contentFit="cover"
-        cachePolicy={IMAGE_CACHE}
-      />
-      {sold ? (
-        <View style={styles.soldOverlay}>
-          <Text style={styles.soldOverlayText}>SOLD</Text>
+      <View style={styles.cardImageWrap}>
+        {item.image ? (
+          <Image
+            source={{ uri: item.image }}
+            style={styles.cardImage}
+            contentFit="cover"
+            cachePolicy={IMAGE_CACHE}
+          />
+        ) : (
+          <View style={styles.cardImageFallback}>
+            <Text style={styles.cardImageFallbackText}>NO PHOTO</Text>
+          </View>
+        )}
+        {sold ? (
+          <View style={styles.soldOverlay}>
+            <Text style={styles.soldOverlayText}>SOLD</Text>
+          </View>
+        ) : null}
+      </View>
+      <View style={styles.cardInfo}>
+        <Text style={styles.cardMeta} numberOfLines={1}>
+          {item.year} · {item.make}
+        </Text>
+        <Text style={styles.cardTitle} numberOfLines={2}>{item.model}</Text>
+        <View style={styles.cardBottomRow}>
+          <Text style={styles.cardPrice}>{formatUsd(item.price)}</Text>
+          {details ? (
+            <Text style={styles.cardDetail} numberOfLines={1}>{details}</Text>
+          ) : null}
         </View>
-      ) : null}
+      </View>
     </Pressable>
   );
 }
@@ -272,38 +225,9 @@ function BuilderGridItem({
 const styles = StyleSheet.create({
   container: S.screenContainer,
 
-  topBar: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: SPACING.page,
-    paddingTop: 8,
-    paddingBottom: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
-  },
-  iconButton: {
-    width: 36,
-    height: 36,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  logo: {
-    flex: 1,
-    fontSize: 25,
-    lineHeight: 30,
-    fontFamily: F.bold,
-    color: COLORS.accent,
-    marginLeft: 4,
-  },
-  topActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
   profileBlock: {
     paddingHorizontal: SPACING.page,
-    paddingTop: 18,
+    paddingTop: 24,
     paddingBottom: 8,
   },
   profileTop: {
@@ -330,24 +254,26 @@ const styles = StyleSheet.create({
     fontFamily: F.bold,
     color: COLORS.textPrimary,
   },
-  starsRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 2,
+  verifiedLine: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: F.semibold,
+    color: COLORS.textSecondary,
     marginTop: 7,
   },
-  reviewCount: {
-    fontSize: 13,
-    fontFamily: F.bold,
-    color: COLORS.textSecondary,
-    marginLeft: 4,
+  memberLine: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 7,
   },
   activityLine: {
     fontSize: 14,
     lineHeight: 18,
     fontFamily: F.regular,
     color: COLORS.textMuted,
-    marginTop: 7,
+    marginTop: 3,
   },
   statsActionRow: {
     flexDirection: "row",
@@ -370,23 +296,18 @@ const styles = StyleSheet.create({
     fontFamily: F.regular,
     color: COLORS.textPrimary,
   },
-  followButton: {
+  contactButton: {
+    flex: 1,
     minHeight: 44,
-    paddingHorizontal: 24,
-    backgroundColor: "#2f63be",
+    paddingHorizontal: 18,
+    backgroundColor: COLORS.black,
     alignItems: "center",
     justifyContent: "center",
   },
-  followButtonText: {
+  contactButtonText: {
     fontSize: 16,
     fontFamily: F.bold,
     color: COLORS.white,
-  },
-  messageButton: {
-    width: 44,
-    height: 44,
-    alignItems: "center",
-    justifyContent: "center",
   },
   shopTitle: {
     fontSize: 17,
@@ -401,60 +322,17 @@ const styles = StyleSheet.create({
     color: COLORS.textPrimary,
     marginTop: 6,
   },
-  tabs: {
+  sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: SPACING.page,
-    borderBottomWidth: 1,
-    borderBottomColor: COLORS.divider,
+    paddingTop: 24,
+    paddingBottom: 16,
   },
-  tab: {
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    borderBottomWidth: 2,
-    borderBottomColor: "transparent",
-  },
-  tabActive: {
-    borderBottomColor: COLORS.textPrimary,
-  },
-  tabText: {
-    fontSize: 16,
-    fontFamily: F.semibold,
-    color: COLORS.textMuted,
-  },
-  tabTextActive: {
-    color: COLORS.textPrimary,
+  sectionTitle: {
+    fontSize: 18,
     fontFamily: F.bold,
-  },
-  filterRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    paddingHorizontal: SPACING.page,
-    paddingTop: 30,
-    paddingBottom: 18,
-  },
-  roundFilter: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: COLORS.gray300,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sortPill: {
-    minHeight: 44,
-    borderRadius: 22,
-    borderWidth: 1,
-    borderColor: COLORS.gray300,
-    paddingHorizontal: 24,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  sortPillText: {
-    fontSize: 16,
-    fontFamily: F.regular,
     color: COLORS.textPrimary,
   },
   grid: {
@@ -465,13 +343,60 @@ const styles = StyleSheet.create({
   },
   card: {
     width: CARD_WIDTH,
+    marginBottom: 18,
+  },
+  cardImageWrap: {
+    width: "100%",
     aspectRatio: 1,
     backgroundColor: COLORS.surface,
+    borderRadius: 8,
     overflow: "hidden",
   },
   cardImage: {
     width: "100%",
     height: "100%",
+  },
+  cardImageFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardImageFallbackText: {
+    fontSize: 11,
+    fontFamily: F.bold,
+    color: COLORS.textMuted,
+  },
+  cardInfo: {
+    paddingTop: 8,
+  },
+  cardMeta: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontFamily: F.semibold,
+    color: COLORS.textSecondary,
+  },
+  cardTitle: {
+    fontSize: 15,
+    lineHeight: 18,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    marginTop: 2,
+  },
+  cardBottomRow: {
+    marginTop: 5,
+  },
+  cardPrice: {
+    fontSize: 14,
+    lineHeight: 17,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+  },
+  cardDetail: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 2,
   },
   soldOverlay: {
     ...StyleSheet.absoluteFillObject,
@@ -514,12 +439,16 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: 6,
   },
-  likesEmpty: {
-    marginHorizontal: SPACING.page,
-    marginTop: 24,
-    borderWidth: 1,
-    borderColor: COLORS.divider,
-    backgroundColor: COLORS.surface,
-    padding: SPACING.lg,
+  emptyListingsButton: {
+    alignSelf: "flex-start",
+    backgroundColor: COLORS.black,
+    paddingHorizontal: 16,
+    paddingVertical: 11,
+    marginTop: SPACING.md,
+  },
+  emptyListingsButtonText: {
+    fontSize: 14,
+    fontFamily: F.bold,
+    color: COLORS.white,
   },
 });

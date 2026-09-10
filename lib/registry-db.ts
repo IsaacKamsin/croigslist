@@ -1,12 +1,4 @@
-import {
-  FEATURED,
-  JUST_LISTED,
-  PROJECT_BIKES,
-  RARE_FINDS,
-  SHOPS,
-  SOLD,
-  UNDER_5K,
-} from "@/data/registry";
+import { SHOPS } from "@/data/registry";
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { formatYear } from "@/lib/formatters";
 import { createId } from "@/lib/ids";
@@ -24,6 +16,7 @@ export type RegistryListing = {
   year: number;
   image: string;
   viewers: number;
+  createdAt?: string;
   city?: string;
   mileage?: string;
   description?: string;
@@ -36,6 +29,7 @@ export type RegistryListing = {
   sellerType?: string;
   sellerVerified?: boolean;
   sellerMemberSince?: string;
+  sellerAvatarUrl?: string;
   images?: string[];
 };
 
@@ -114,17 +108,17 @@ type ListingRow = {
   condition: string | null;
   location: string | null;
   image_url: string | null;
-  image_urls: string[] | null;
+  image_urls?: string[] | null;
   viewer_count: number | null;
   status: ListingStatus | null;
   is_featured: boolean | null;
   is_rare: boolean | null;
   is_project: boolean | null;
   created_at: string | null;
-  seller_name: string | null;
-  seller_type: string | null;
-  seller_verified: boolean | null;
-  seller_member_since: string | null;
+  seller_name?: string | null;
+  seller_type?: string | null;
+  seller_verified?: boolean | null;
+  seller_member_since?: string | null;
 };
 
 type ShopRow = {
@@ -153,25 +147,30 @@ type ProfileBuilderRow = {
   city: string | null;
   role: string | null;
   garage_name: string | null;
-  contact_email: string | null;
-  phone: string | null;
-  website: string | null;
+  garage_image_url?: string | null;
+  avatar_url: string | null;
   bio: string | null;
   is_verified: boolean | null;
   bikes_count: number | null;
   created_at: string | null;
 };
 
-const fallbackRegistryData: RegistryData = {
-  featured: FEATURED,
-  bikesForSale: [FEATURED, ...JUST_LISTED, ...UNDER_5K, ...RARE_FINDS, ...PROJECT_BIKES],
+// Contact details are not part of the directory. They live on profiles, which
+// is readable only by the owner and by conversation counterparties, so the way
+// to reach a seller is to message them.
+const PUBLIC_PROFILE_SELECT =
+  "id, full_name, handle, city, role, garage_name, garage_image_url, avatar_url, bio, is_verified, bikes_count, created_at";
+
+const emptyRegistryData: RegistryData = {
+  featured: null,
+  bikesForSale: [],
   partsForSale: [],
-  justListed: JUST_LISTED,
-  under5k: UNDER_5K,
-  rareFinds: RARE_FINDS,
-  projectBikes: PROJECT_BIKES,
-  shops: SHOPS,
-  sold: SOLD,
+  justListed: [],
+  under5k: [],
+  rareFinds: [],
+  projectBikes: [],
+  shops: [],
+  sold: [],
 };
 
 function listingFromRow(row: ListingRow): RegistryListing {
@@ -183,6 +182,7 @@ function listingFromRow(row: ListingRow): RegistryListing {
     price: row.price ?? 0,
     image: row.image_url ?? "",
     viewers: row.viewer_count ?? 0,
+    createdAt: row.created_at ?? undefined,
     city: row.location ?? undefined,
     mileage: row.mileage ?? undefined,
     description: row.description ?? undefined,
@@ -204,12 +204,24 @@ function listingFromRow(row: ListingRow): RegistryListing {
   };
 }
 
+function hasRealListingOwner(row: ListingRow) {
+  return Boolean(row.seller_id || row.shop_id);
+}
+
+function sellerNameFromProfile(profile: ProfileBuilderRow | null) {
+  return profile?.garage_name || profile?.full_name || profile?.handle || undefined;
+}
+
+function sellerImageFromProfile(profile: ProfileBuilderRow | null) {
+  return profile?.garage_image_url || profile?.avatar_url || undefined;
+}
+
 function shopFromRow(row: ShopRow): RegistryShop {
   return {
     id: row.id,
     slug: row.slug ?? row.id,
     kind: "shop",
-    name: row.name ?? "Builder",
+    name: row.name ?? "Seller",
     specialty: row.specialty ?? "Motorcycles",
     builds: row.builds_count ?? 0,
     image: row.image_url ?? "",
@@ -235,19 +247,27 @@ function builderFromProfile(row: ProfileBuilderRow): RegistryShop {
     name,
     specialty: row.bio || "Private seller",
     builds: row.bikes_count ?? 0,
-    image: "",
+    image: row.garage_image_url || row.avatar_url || "",
     tagline: row.city ? `${row.city} seller` : "Seller profile",
     verified: Boolean(row.is_verified),
     badges: row.role === "builder" ? ["builder"] : ["seller"],
     location: row.city ?? undefined,
-    email: row.contact_email ?? undefined,
-    phone: row.phone ?? undefined,
-    website: row.website ?? undefined,
   };
 }
 
+function isDirectoryBuilderProfile(row: ProfileBuilderRow) {
+  return (
+    row.role === "builder" ||
+    Boolean(row.garage_name?.trim()) ||
+    (row.bikes_count ?? 0) > 0
+  );
+}
+
+// listingFromRow maps seller_name/seller_type/seller_verified/seller_member_since,
+// and createListing writes them, but they were never selected back -- which is why
+// every listing rendered its seller as the literal "Seller".
 const LISTING_SELECT =
-  "id, seller_id, shop_id, year, make, model, price, mileage, description, condition, location, image_url, image_urls, viewer_count, status, is_featured, is_rare, is_project, created_at, seller_name, seller_type, seller_verified, seller_member_since";
+  "id, seller_id, shop_id, year, make, model, price, mileage, description, condition, location, image_url, viewer_count, status, is_featured, is_rare, is_project, created_at, image_urls, seller_name, seller_type, seller_verified, seller_member_since";
 
 const SHOP_SELECT =
   "id, slug, name, specialty, builds_count, image_url, tagline, verified, badges, location, address, phone, email, website, appointment_only, build_styles";
@@ -327,9 +347,9 @@ async function uploadListingImages(
 }
 
 export async function fetchRegistryData(): Promise<RegistryData> {
-  if (!isSupabaseConfigured) return fallbackRegistryData;
+  if (!isSupabaseConfigured) return emptyRegistryData;
 
-  const [listingsResult, shopsResult] = await Promise.all([
+  const [listingsResult, shopsResult, profilesResult] = await Promise.all([
     supabase
       .from("listings")
       .select(LISTING_SELECT)
@@ -340,16 +360,22 @@ export async function fetchRegistryData(): Promise<RegistryData> {
       .select(SHOP_SELECT)
       .order("name", { ascending: true })
       .limit(20),
+    supabase
+      .from("public_profiles")
+      .select(PUBLIC_PROFILE_SELECT)
+      .or("role.eq.builder,garage_name.not.is.null,bikes_count.gt.0")
+      .order("created_at", { ascending: false })
+      .limit(40),
   ]);
 
-  if (listingsResult.error || shopsResult.error) {
-    return fallbackRegistryData;
-  }
-
-  const listingRows = (listingsResult.data ?? []) as ListingRow[];
+  const listingRows = (listingsResult.error ? [] : (listingsResult.data ?? []) as ListingRow[])
+    .filter(hasRealListingOwner);
   const shopRows = (shopsResult.data ?? []) as ShopRow[];
+  const profileRows = ((profilesResult.data ?? []) as ProfileBuilderRow[]).filter(
+    isDirectoryBuilderProfile,
+  );
 
-  const activeRows = listingRows.filter((row) => row.status !== "sold");
+  const activeRows = listingRows.filter((row) => row.status === "active");
   const soldRows = listingRows.filter((row) => row.status === "sold");
   const activeListings = activeRows.map(listingFromRow);
   const bikeListings = activeListings.filter((listing) => !looksLikePart(listing));
@@ -357,7 +383,8 @@ export async function fetchRegistryData(): Promise<RegistryData> {
   const under5kRows = activeRows.filter((row) => (row.price ?? 0) < 5000);
   const rareRows = activeRows.filter((row) => row.is_rare);
   const projectRows = activeRows.filter((row) => row.is_project);
-  const shops = shopRows.map(shopFromRow);
+  const shops = [...profileRows.map(builderFromProfile), ...shopRows.map(shopFromRow)];
+  const visibleShops = shops;
   const featuredRow =
     activeRows.find((row) => row.is_featured) ?? activeRows[0] ?? null;
   const sold =
@@ -372,9 +399,10 @@ export async function fetchRegistryData(): Promise<RegistryData> {
 
   if (bikeListings.length === 0) {
     return {
-      ...fallbackRegistryData,
-      shops: shops.length > 0 ? shops : fallbackRegistryData.shops,
-      sold: sold.length > 0 ? sold : fallbackRegistryData.sold,
+      ...emptyRegistryData,
+      partsForSale: partListings.slice(0, 12),
+      shops: visibleShops,
+      sold,
     };
   }
 
@@ -386,20 +414,13 @@ export async function fetchRegistryData(): Promise<RegistryData> {
     under5k: under5kRows.slice(0, 3).map(listingFromRow),
     rareFinds: rareRows.slice(0, 8).map(listingFromRow),
     projectBikes: projectRows.slice(0, 3).map(listingFromRow),
-    shops,
+    shops: visibleShops,
     sold,
   };
 }
 
 export async function fetchListings(): Promise<RegistryListing[]> {
-  if (!isSupabaseConfigured) {
-    return [
-      ...JUST_LISTED,
-      ...UNDER_5K,
-      ...RARE_FINDS,
-      ...PROJECT_BIKES,
-    ].map((item) => ({ ...item, status: "active" }));
-  }
+  if (!isSupabaseConfigured) return [];
 
   const { data, error } = await supabase
     .from("listings")
@@ -409,7 +430,7 @@ export async function fetchListings(): Promise<RegistryListing[]> {
     .limit(100);
 
   if (error) return [];
-  return ((data ?? []) as ListingRow[]).map(listingFromRow);
+  return ((data ?? []) as ListingRow[]).filter(hasRealListingOwner).map(listingFromRow);
 }
 
 export async function fetchMyListings(): Promise<RegistryListing[]> {
@@ -466,52 +487,68 @@ export async function createListing(input: CreateListingInput): Promise<Registry
   const year = digitsOnlyNumber(input.year);
   const price = digitsOnlyNumber(input.price);
   const location = input.location?.trim() || profile?.city || null;
-  const createdYear = formatYear(profile?.created_at);
+
+  const listingRow = {
+    seller_id: user.id,
+    year,
+    make: input.make.trim().toUpperCase(),
+    model: input.model.trim(),
+    price: price ?? 0,
+    mileage: input.mileage?.trim() || null,
+    description: input.description?.trim() || null,
+    condition: input.condition,
+    location,
+    image_url: images[0] ?? null,
+    image_urls: images,
+    status: "active",
+    is_project: input.condition === "project",
+    seller_name:
+      profile?.garage_name ||
+      profile?.full_name ||
+      profile?.handle ||
+      null,
+    seller_type: profile?.role || null,
+    seller_verified: Boolean(profile?.is_verified),
+    seller_member_since: formatYear(profile?.created_at),
+  };
 
   const { data, error } = await supabase
     .from("listings")
-    .insert({
-      seller_id: user.id,
-      year,
-      make: input.make.trim().toUpperCase(),
-      model: input.model.trim(),
-      price: price ?? 0,
-      mileage: input.mileage?.trim() || null,
-      description: input.description?.trim() || null,
-      condition: input.condition,
-      location,
-      image_url: images[0] ?? null,
-      image_urls: images,
-      status: "active",
-      is_project: input.condition === "project",
-      seller_name:
-        profile?.garage_name ||
-        profile?.full_name ||
-        profile?.handle ||
-        user.email?.split("@")[0] ||
-        "Seller",
-      seller_type: profile?.role || "seller",
-      seller_verified: Boolean(profile?.is_verified),
-      seller_member_since: createdYear,
-    })
+    .insert(listingRow)
     .select(LISTING_SELECT)
     .single<ListingRow>();
 
-  if (error) throw error;
+  if (error) {
+    const fallbackRow = {
+      seller_id: listingRow.seller_id,
+      year: listingRow.year,
+      make: listingRow.make,
+      model: listingRow.model,
+      price: listingRow.price,
+      mileage: listingRow.mileage,
+      description: listingRow.description,
+      condition: listingRow.condition,
+      location: listingRow.location,
+      image_url: listingRow.image_url,
+      status: listingRow.status,
+      is_project: listingRow.is_project,
+    };
+
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from("listings")
+      .insert(fallbackRow)
+      .select(LISTING_SELECT)
+      .single<ListingRow>();
+
+    if (fallbackError) throw fallbackError;
+    return listingFromRow(fallbackData);
+  }
+
   return listingFromRow(data);
 }
 
 export async function fetchListingById(id: string): Promise<RegistryListing | null> {
-  if (!isSupabaseConfigured) {
-    const fallback = [
-      FEATURED,
-      ...JUST_LISTED,
-      ...UNDER_5K,
-      ...RARE_FINDS,
-      ...PROJECT_BIKES,
-    ].find((item) => item.id === id);
-    return fallback ? { ...fallback, status: "active" } : null;
-  }
+  if (!isSupabaseConfigured) return null;
 
   const { data, error } = await supabase
     .from("listings")
@@ -519,12 +556,29 @@ export async function fetchListingById(id: string): Promise<RegistryListing | nu
     .eq("id", id)
     .maybeSingle<ListingRow>();
 
-  if (error) return null;
-  return data ? listingFromRow(data) : null;
+  if (error || !data || !hasRealListingOwner(data)) return null;
+
+  const listing = listingFromRow(data);
+  if (!data.seller_id) return listing;
+
+  const { data: profile } = await supabase
+    .from("public_profiles")
+    .select(PUBLIC_PROFILE_SELECT)
+    .eq("id", data.seller_id)
+    .maybeSingle<ProfileBuilderRow>();
+
+  return {
+    ...listing,
+    sellerName: listing.sellerName || sellerNameFromProfile(profile),
+    sellerType: listing.sellerType || profile?.role || undefined,
+    sellerVerified: listing.sellerVerified ?? Boolean(profile?.is_verified),
+    sellerMemberSince: listing.sellerMemberSince || formatYear(profile?.created_at),
+    sellerAvatarUrl: sellerImageFromProfile(profile),
+  };
 }
 
 export async function fetchShops(): Promise<RegistryShop[]> {
-  if (!isSupabaseConfigured) return SHOPS;
+  if (!isSupabaseConfigured) return [];
 
   const { data, error } = await supabase
     .from("shops")
@@ -537,12 +591,13 @@ export async function fetchShops(): Promise<RegistryShop[]> {
 }
 
 export async function fetchBuilders(): Promise<RegistryShop[]> {
-  if (!isSupabaseConfigured) return SHOPS;
+  if (!isSupabaseConfigured) return [];
 
   const [profilesResult, shopsResult] = await Promise.all([
     supabase
-      .from("profiles")
-      .select("id, full_name, handle, city, role, garage_name, contact_email, phone, website, bio, is_verified, bikes_count, created_at")
+      .from("public_profiles")
+      .select(PUBLIC_PROFILE_SELECT)
+      .or("role.eq.builder,garage_name.not.is.null,bikes_count.gt.0")
       .order("created_at", { ascending: false })
       .limit(100),
     supabase
@@ -552,19 +607,18 @@ export async function fetchBuilders(): Promise<RegistryShop[]> {
       .limit(100),
   ]);
 
-  const profiles = ((profilesResult.data ?? []) as ProfileBuilderRow[]).map(
-    builderFromProfile,
-  );
+  const profiles = ((profilesResult.data ?? []) as ProfileBuilderRow[])
+    .filter(isDirectoryBuilderProfile)
+    .map(builderFromProfile);
   const shops = ((shopsResult.data ?? []) as ShopRow[]).map(shopFromRow);
+  const combinedProfiles = [...profiles, ...shops];
 
   if (profilesResult.error && shopsResult.error) return [];
-  return [...profiles, ...shops];
+  return combinedProfiles;
 }
 
 export async function fetchShopBySlug(slug: string): Promise<RegistryShop | null> {
-  if (!isSupabaseConfigured) {
-    return SHOPS.find((shop) => shop.slug === slug) ?? null;
-  }
+  if (!isSupabaseConfigured) return null;
 
   const { data, error } = await supabase
     .from("shops")
@@ -586,7 +640,7 @@ export async function fetchShopBySlug(slug: string): Promise<RegistryShop | null
 
   return {
     ...shop,
-    listings: ((listingData ?? []) as ListingRow[]).map(listingFromRow),
+    listings: ((listingData ?? []) as ListingRow[]).filter(hasRealListingOwner).map(listingFromRow),
   };
 }
 
@@ -594,24 +648,10 @@ export async function fetchBuilderProfile(id: string) {
   if (!isSupabaseConfigured) return null;
 
   const { data: profile } = await supabase
-    .from("profiles")
-    .select("id, full_name, handle, city, role, garage_name, contact_email, phone, website, bio, is_verified, member_status, bikes_count, created_at")
+    .from("public_profiles")
+    .select(PUBLIC_PROFILE_SELECT)
     .eq("id", id)
-    .maybeSingle<{
-      id: string;
-      full_name: string | null;
-      handle: string | null;
-      city: string | null;
-      role: string | null;
-      garage_name: string | null;
-      contact_email: string | null;
-      phone: string | null;
-      website: string | null;
-      bio: string | null;
-      is_verified: boolean | null;
-      bikes_count: number | null;
-      created_at: string | null;
-    }>();
+    .maybeSingle<ProfileBuilderRow>();
 
   const { data: listingData } = await supabase
     .from("listings")
@@ -623,17 +663,29 @@ export async function fetchBuilderProfile(id: string) {
 
   if (!profile) return null;
 
+  // Returns a row only once the two of you share a conversation; otherwise RLS
+  // yields nothing and the page shows no contact details.
+  const { data: contact } = await supabase
+    .from("profiles")
+    .select("contact_email, phone, website")
+    .eq("id", id)
+    .maybeSingle<{
+      contact_email: string | null;
+      phone: string | null;
+      website: string | null;
+    }>();
+
   return {
     id: profile.id,
-    name: profile.garage_name || profile.full_name || profile.handle || "Builder",
-    type: profile.role || "builder",
+    name: profile.garage_name || profile.full_name || profile.handle || "Seller",
+    type: profile.role || "seller",
     city: profile.city || "",
     verified: Boolean(profile.is_verified),
     memberSince: formatYear(profile.created_at),
     bio: profile.bio || "",
-    email: profile.contact_email || "",
-    phone: profile.phone || "",
-    website: profile.website || "",
-    listings: ((listingData ?? []) as ListingRow[]).map(listingFromRow),
+    email: contact?.contact_email || "",
+    phone: contact?.phone || "",
+    website: contact?.website || "",
+    listings: ((listingData ?? []) as ListingRow[]).filter(hasRealListingOwner).map(listingFromRow),
   };
 }

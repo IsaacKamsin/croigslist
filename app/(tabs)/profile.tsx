@@ -1,4 +1,4 @@
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Alert, ActivityIndicator } from 'react-native';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { hapticLight, hapticWarning } from '@/hooks/useHaptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -6,12 +6,31 @@ import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'expo-router';
 import { COLORS, F, SPACING, TYPE } from '@/constants/design';
 import { S } from '@/constants/styles';
+import { Image } from 'expo-image';
 import { ShareNetworkIcon } from 'phosphor-react-native';
 import { fetchGarageBikes } from '@/lib/garage-db';
 import { fetchMyListings } from '@/lib/registry-db';
 import { fetchMessageThreads } from '@/lib/messages-db';
 import { useQuery } from '@tanstack/react-query';
 import { shareBuyerInvite, shareSellerInvite } from '@/lib/share';
+import { cancelAnnualMembership, syncAnnualMembership } from '@/lib/payments';
+import { useEffect, useState } from 'react';
+
+function formatSubscriptionDate(value?: string) {
+  if (!value) return '';
+  return new Date(value).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
+function subscriptionLabel(status?: string) {
+  if (status === 'active' || status === 'trialing') return 'ACTIVE';
+  if (status === 'past_due') return 'PAST DUE';
+  if (status === 'canceled' || status === 'unpaid') return 'INACTIVE';
+  return 'MEMBERSHIP';
+}
 
 function StatBlock({ label, value }: { label: string; value: string }) {
   return (
@@ -55,9 +74,27 @@ function ShareInviteRow({ onPress }: { onPress: () => void }) {
 }
 
 export default function ProfileScreen() {
-  const { activeView, member, signOut, setActiveView } = useAuth();
+  const { activeView, member, memberStatus, refreshMemberProfile, signOut, setActiveView } = useAuth();
   const router = useRouter();
   const isBuilder = activeView === 'builder';
+  const [isCancelingMembership, setIsCancelingMembership] = useState(false);
+  const [locallyCanceledRenewal, setLocallyCanceledRenewal] = useState(false);
+  const renewalDate = formatSubscriptionDate(member?.subscriptionCurrentPeriodEnd);
+  const hasActiveSubscription =
+    member?.subscriptionStatus === 'active' ||
+    member?.subscriptionStatus === 'trialing';
+  const isCancelingAtPeriodEnd = Boolean(
+    member?.subscriptionCancelAtPeriodEnd || locallyCanceledRenewal,
+  );
+  const membershipSubtitle = member?.subscriptionStatus === 'trialing' && renewalDate
+    ? `$100/year · Trial ends ${renewalDate}`
+    : hasActiveSubscription && isCancelingAtPeriodEnd && renewalDate
+    ? `$100/year · Cancels ${renewalDate}`
+    : hasActiveSubscription && renewalDate
+    ? `$100/year · Renews ${renewalDate}`
+    : hasActiveSubscription
+      ? '$100/year · Active membership'
+      : '$100/year · Complete payment to activate';
   const { data: stats } = useQuery({
     queryKey: ['profile-stats', member?.id],
     queryFn: async () => {
@@ -81,6 +118,114 @@ export default function ProfileScreen() {
     },
   });
 
+  useEffect(() => {
+    if (!hasActiveSubscription || renewalDate || !member?.subscriptionId) return;
+
+    syncAnnualMembership(member.subscriptionId)
+      .then(() => refreshMemberProfile())
+      .catch((error) => {
+        console.warn(
+          "Membership expiry sync failed.",
+          error instanceof Error ? error.message : error,
+        );
+      });
+  }, [
+    hasActiveSubscription,
+    member?.subscriptionId,
+    refreshMemberProfile,
+    renewalDate,
+  ]);
+
+  useEffect(() => {
+    if (!hasActiveSubscription || member?.subscriptionCancelAtPeriodEnd) return;
+    setLocallyCanceledRenewal(false);
+  }, [
+    hasActiveSubscription,
+    member?.subscriptionCancelAtPeriodEnd,
+    member?.subscriptionId,
+  ]);
+
+  const cancelMembership = () => {
+    if (!member?.subscriptionId || isCancelingMembership) return;
+
+    hapticWarning();
+    Alert.alert(
+      'Cancel membership?',
+      renewalDate
+        ? `Your membership stays active until ${renewalDate}. You will not be charged again.`
+        : 'Your membership stays active through the current billing period. You will not be charged again.',
+      [
+        { text: 'Keep Membership', style: 'cancel' },
+        {
+          text: 'Cancel Renewal',
+          style: 'destructive',
+          onPress: async () => {
+            setIsCancelingMembership(true);
+            try {
+              await cancelAnnualMembership(member.subscriptionId as string);
+              setLocallyCanceledRenewal(true);
+              await refreshMemberProfile();
+            } catch (error) {
+              Alert.alert(
+                'Could not cancel',
+                error instanceof Error ? error.message : 'Try again in a moment.',
+              );
+            } finally {
+              setIsCancelingMembership(false);
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const openMembershipGate = () => {
+    hapticLight();
+    router.push('/payment');
+  };
+
+  const membershipCardContent = (
+    <>
+      <View style={styles.membershipCopy}>
+        <Text style={styles.membershipEyebrow}>SUBSCRIPTION</Text>
+        <Text style={styles.membershipTitle}>Croigslist membership</Text>
+        <Text style={styles.membershipSubtitle}>{membershipSubtitle}</Text>
+        {hasActiveSubscription && !isCancelingAtPeriodEnd && member?.subscriptionId ? (
+          <Pressable
+            style={styles.cancelMembershipButton}
+            onPress={cancelMembership}
+            disabled={isCancelingMembership}
+          >
+            {isCancelingMembership ? (
+              <ActivityIndicator size="small" color={COLORS.textMuted} />
+            ) : (
+              <Text style={styles.cancelMembershipText}>Cancel renewal</Text>
+            )}
+          </Pressable>
+        ) : !hasActiveSubscription ? (
+          <Text style={styles.membershipAction}>START MEMBERSHIP</Text>
+        ) : null}
+      </View>
+      <View
+        style={[
+          styles.membershipBadge,
+          memberStatus !== 'approved' && styles.membershipBadgeWarning,
+        ]}
+      >
+        <Text
+          style={[
+            styles.membershipBadgeText,
+            memberStatus !== 'approved' && styles.membershipBadgeTextWarning,
+          ]}
+        >
+          {memberStatus === 'approved'
+            ? subscriptionLabel(member?.subscriptionStatus)
+            : 'UNPAID'}
+        </Text>
+      </View>
+    </>
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -89,7 +234,15 @@ export default function ProfileScreen() {
         <View style={styles.summary}>
           <View style={styles.summaryTop}>
             <View style={styles.avatarLarge}>
-              <Text style={styles.avatarLargeText}>{member?.name?.[0] ?? 'M'}</Text>
+              {member?.avatarUrl ? (
+                <Image
+                  source={{ uri: member.avatarUrl }}
+                  style={styles.avatarImage}
+                  contentFit="cover"
+                />
+              ) : (
+                <Text style={styles.avatarLargeText}>{member?.name?.[0] ?? 'M'}</Text>
+              )}
             </View>
             <View style={styles.summaryText}>
               <Text style={styles.name}>{member?.name ?? 'Member'}</Text>
@@ -122,12 +275,25 @@ export default function ProfileScreen() {
 
           <View style={styles.statsRow}>
             <StatBlock
-              label={isBuilder ? 'LISTINGS' : 'GARAGE'}
+              label={isBuilder ? 'LISTINGS' : 'SAVED'}
               value={String(isBuilder ? stats.listingCount : stats.garageCount)}
             />
             <StatBlock label={isBuilder ? 'SOLD' : 'MESSAGES'} value={String(isBuilder ? stats.soldCount : stats.messageCount)} />
             <StatBlock label={isBuilder ? 'DRAFTS' : 'WATCHING'} value={String(isBuilder ? 0 : stats.garageCount)} />
           </View>
+
+          {hasActiveSubscription ? (
+            <View style={styles.membershipCard}>{membershipCardContent}</View>
+          ) : (
+            <Pressable
+              style={styles.membershipCard}
+              onPress={openMembershipGate}
+              accessibilityRole="button"
+              accessibilityLabel="Open membership payment"
+            >
+              {membershipCardContent}
+            </Pressable>
+          )}
         </View>
 
         <View style={styles.divider} />
@@ -142,7 +308,7 @@ export default function ProfileScreen() {
                 router.replace('/(tabs)');
               }} />
               <MenuRow
-                label="CHANGE GARAGE DETAILS"
+                label="EDIT SELLER PROFILE"
                 subtitle="Contact info, city, bio, and public profile"
                 onPress={() => {
                   hapticLight();
@@ -160,7 +326,7 @@ export default function ProfileScreen() {
               <MenuRow label="LIST A BIKE" onPress={() => router.push('/listing/create')} />
               <MenuRow
                 label="INVITE BUYERS"
-                subtitle="Share the registry with riders"
+                subtitle="Share Croigslist with riders"
                 onPress={() => {
                   hapticLight();
                   shareBuyerInvite();
@@ -175,24 +341,8 @@ export default function ProfileScreen() {
                 router.replace('/(tabs)');
               }} />
               <MenuRow
-                label="DREAM GARAGE"
-                subtitle="Saved bikes and bike scans"
-                onPress={() => {
-                  hapticLight();
-                  router.replace('/(tabs)/vault');
-                }}
-              />
-              <MenuRow
-                label="SEARCH"
-                subtitle="Find listings by year, make, or model"
-                onPress={() => {
-                  hapticLight();
-                  router.replace('/(tabs)/search');
-                }}
-              />
-              <MenuRow
                 label="INVITE A SELLER"
-                subtitle="Bring more bikes into the registry"
+                subtitle="Bring more bikes into the marketplace"
                 onPress={() => {
                   hapticLight();
                   shareSellerInvite();
@@ -244,6 +394,11 @@ const styles = StyleSheet.create({
     ...S.avatarBase,
     width: 86,
     height: 86,
+    overflow: 'hidden',
+  },
+  avatarImage: {
+    width: '100%',
+    height: '100%',
   },
   avatarLargeText: {
     ...S.avatarText,
@@ -329,6 +484,80 @@ const styles = StyleSheet.create({
     ...TYPE.label,
     letterSpacing: 2,
     marginTop: 4,
+  },
+  membershipCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    borderRadius: 8,
+    padding: 16,
+    marginTop: SPACING.lg,
+  },
+  membershipCopy: {
+    flex: 1,
+  },
+  membershipEyebrow: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.8,
+    color: COLORS.textMuted,
+  },
+  membershipTitle: {
+    fontSize: 18,
+    lineHeight: 22,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    marginTop: 5,
+  },
+  membershipSubtitle: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 3,
+  },
+  membershipAction: {
+    alignSelf: 'flex-start',
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.2,
+    color: COLORS.accent,
+    marginTop: SPACING.sm,
+  },
+  membershipBadge: {
+    borderRadius: 14,
+    backgroundColor: COLORS.black,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  membershipBadgeWarning: {
+    backgroundColor: COLORS.accent,
+  },
+  membershipBadgeText: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.2,
+    color: COLORS.white,
+  },
+  membershipBadgeTextWarning: {
+    color: COLORS.white,
+  },
+  cancelMembershipButton: {
+    alignSelf: 'flex-start',
+    marginTop: SPACING.sm,
+    paddingVertical: 4,
+  },
+  cancelMembershipText: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: F.semibold,
+    color: COLORS.textMuted,
   },
   menu: {
     paddingVertical: SPACING.sm,
