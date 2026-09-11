@@ -1,5 +1,6 @@
 import { COLORS, F, SPACING, TYPE } from "@/constants/design";
 import { S } from "@/constants/styles";
+import { KeyboardScreen, keyboardScrollProps } from "@/components/KeyboardScreen";
 import {
   fetchGarageDetails,
   updateGarageDetails,
@@ -11,7 +12,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
 import { useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import {
   Alert,
@@ -48,6 +49,7 @@ function Field({
   placeholder,
   keyboardType,
   multiline,
+  onFocus,
 }: {
   label: string;
   value: string;
@@ -55,6 +57,7 @@ function Field({
   placeholder?: string;
   keyboardType?: "default" | "email-address" | "phone-pad" | "url";
   multiline?: boolean;
+  onFocus?: () => void;
 }) {
   return (
     <View style={styles.field}>
@@ -69,6 +72,7 @@ function Field({
         autoCapitalize="none"
         autoCorrect={false}
         multiline={multiline}
+        onFocus={onFocus}
       />
     </View>
   );
@@ -77,6 +81,7 @@ function Field({
 export default function GarageDetailsScreen() {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const scrollRef = useRef<ScrollView>(null);
   const {
     control,
     handleSubmit,
@@ -136,19 +141,27 @@ export default function GarageDetailsScreen() {
 
   const save = async (details: GarageDetailsForm) => {
     try {
-      await updateGarageDetails(details as GarageDetails, garageImage ? {
-        uri: garageImage.uri,
-        data: {
-          base64: garageImage.base64,
-          mimeType: garageImage.mimeType,
-        },
-      } : undefined);
-      await Promise.all([
+      await updateGarageDetails(
+        details as GarageDetails,
+        garageImage
+          ? {
+              uri: garageImage.uri,
+              data: {
+                base64: garageImage.base64,
+                mimeType: garageImage.mimeType,
+              },
+            }
+          : undefined,
+      );
+
+      Promise.all([
         queryClient.invalidateQueries({ queryKey: ["shops-tab"] }),
         queryClient.invalidateQueries({ queryKey: ["home"] }),
         queryClient.invalidateQueries({ queryKey: ["profile-stats"] }),
         queryClient.invalidateQueries({ queryKey: ["garage-details"] }),
-      ]);
+      ]).catch((cacheError) => {
+        console.warn("Garage details saved, but cache refresh failed.", cacheError);
+      });
       backOrReplace(router, "/(tabs)");
     } catch (error: any) {
       Alert.alert(
@@ -158,121 +171,134 @@ export default function GarageDetailsScreen() {
     }
   };
 
+  const scrollToBio = () => {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 120);
+  };
+
   return (
-    <ScrollView
-      style={styles.container}
-      contentContainerStyle={styles.content}
-      showsVerticalScrollIndicator={false}
-    >
-      <Text style={styles.kicker}>SELLER PROFILE</Text>
-      <Text style={styles.title}>Seller Profile</Text>
-      <Text style={styles.body}>
-        This is the public name and contact information buyers see when they
-        view your garage.
-      </Text>
-
-      <Pressable style={styles.imagePicker} onPress={pickGarageImage}>
-        {garageImage?.uri || savedDetails?.garageImageUrl ? (
-          <Image
-            source={{ uri: garageImage?.uri ?? savedDetails?.garageImageUrl }}
-            style={styles.garageImage}
-            contentFit="cover"
-          />
-        ) : (
-          <Text style={styles.imagePickerText}>Add garage image</Text>
-        )}
-      </Pressable>
-
-      <Controller
-        control={control}
-        name="garageName"
-        render={({ field: { onChange, value } }) => (
-          <Field
-            label="GARAGE NAME"
-            value={value ?? ""}
-            onChangeText={onChange}
-            placeholder="c9d141fb"
-          />
-        )}
-      />
-      <Controller
-        control={control}
-        name="contactEmail"
-        render={({ field: { onChange, value } }) => (
-          <Field
-            label="CONTACT EMAIL"
-            value={value ?? ""}
-            onChangeText={onChange}
-            placeholder="you@email.com"
-            keyboardType="email-address"
-          />
-        )}
-      />
-      {errors.contactEmail?.message ? (
-        <Text style={styles.error}>{errors.contactEmail.message}</Text>
-      ) : null}
-      <Controller
-        control={control}
-        name="phone"
-        render={({ field: { onChange, value } }) => (
-          <Field
-            label="PHONE"
-            value={value ?? ""}
-            onChangeText={onChange}
-            placeholder="(612) 555-0199"
-            keyboardType="phone-pad"
-          />
-        )}
-      />
-      <Controller
-        control={control}
-        name="website"
-        render={({ field: { onChange, value } }) => (
-          <Field
-            label="WEBSITE"
-            value={value ?? ""}
-            onChangeText={onChange}
-            placeholder="garage.com"
-            keyboardType="url"
-          />
-        )}
-      />
-      <Controller
-        control={control}
-        name="city"
-        render={({ field: { onChange, value } }) => (
-          <Field
-            label="CITY"
-            value={value ?? ""}
-            onChangeText={onChange}
-            placeholder="Minneapolis"
-          />
-        )}
-      />
-      <Controller
-        control={control}
-        name="bio"
-        render={({ field: { onChange, value } }) => (
-          <Field
-            label="BIO"
-            value={value ?? ""}
-            onChangeText={onChange}
-            placeholder="What do you build, sell, or restore?"
-            multiline
-          />
-        )}
-      />
-
-      <Pressable
-        style={[styles.saveButton, isSubmitting && styles.saveButtonDisabled]}
-        onPress={handleSubmit(save)}
-        disabled={isSubmitting}
+    <KeyboardScreen style={styles.container}>
+      <ScrollView
+        ref={scrollRef}
+        style={styles.container}
+        contentContainerStyle={styles.content}
+        showsVerticalScrollIndicator={false}
+        {...keyboardScrollProps}
+        keyboardDismissMode="none"
+        keyboardShouldPersistTaps="always"
       >
-        <Text style={styles.saveButtonText}>
-          {isSubmitting ? "SAVING..." : "SAVE GARAGE DETAILS"}
+        <Text style={styles.kicker}>SELLER PROFILE</Text>
+        <Text style={styles.title}>Seller Profile</Text>
+        <Text style={styles.body}>
+          This is the public name and contact information buyers see when they
+          view your garage.
         </Text>
-      </Pressable>
-    </ScrollView>
+
+        <Pressable style={styles.imagePicker} onPress={pickGarageImage}>
+          {garageImage?.uri || savedDetails?.garageImageUrl ? (
+            <Image
+              source={{ uri: garageImage?.uri ?? savedDetails?.garageImageUrl }}
+              style={styles.garageImage}
+              contentFit="cover"
+            />
+          ) : (
+            <Text style={styles.imagePickerText}>Add garage image</Text>
+          )}
+        </Pressable>
+
+        <Controller
+          control={control}
+          name="garageName"
+          render={({ field: { onChange, value } }) => (
+            <Field
+              label="GARAGE NAME"
+              value={value ?? ""}
+              onChangeText={onChange}
+              placeholder="c9d141fb"
+            />
+          )}
+        />
+        <Controller
+          control={control}
+          name="contactEmail"
+          render={({ field: { onChange, value } }) => (
+            <Field
+              label="CONTACT EMAIL"
+              value={value ?? ""}
+              onChangeText={onChange}
+              placeholder="you@email.com"
+              keyboardType="email-address"
+            />
+          )}
+        />
+        {errors.contactEmail?.message ? (
+          <Text style={styles.error}>{errors.contactEmail.message}</Text>
+        ) : null}
+        <Controller
+          control={control}
+          name="phone"
+          render={({ field: { onChange, value } }) => (
+            <Field
+              label="PHONE"
+              value={value ?? ""}
+              onChangeText={onChange}
+              placeholder="(612) 555-0199"
+              keyboardType="phone-pad"
+            />
+          )}
+        />
+        <Controller
+          control={control}
+          name="website"
+          render={({ field: { onChange, value } }) => (
+            <Field
+              label="WEBSITE"
+              value={value ?? ""}
+              onChangeText={onChange}
+              placeholder="garage.com"
+              keyboardType="url"
+            />
+          )}
+        />
+        <Controller
+          control={control}
+          name="city"
+          render={({ field: { onChange, value } }) => (
+            <Field
+              label="CITY"
+              value={value ?? ""}
+              onChangeText={onChange}
+              placeholder="Minneapolis"
+            />
+          )}
+        />
+        <Controller
+          control={control}
+          name="bio"
+          render={({ field: { onChange, value } }) => (
+            <Field
+              label="BIO"
+              value={value ?? ""}
+              onChangeText={onChange}
+              placeholder="What do you build, sell, or restore?"
+              multiline
+              onFocus={scrollToBio}
+            />
+          )}
+        />
+
+        <Pressable
+          style={[styles.saveButton, isSubmitting && styles.saveButtonDisabled]}
+          onPress={handleSubmit(save)}
+          disabled={isSubmitting}
+        >
+          <Text style={styles.saveButtonText}>
+            {isSubmitting ? "SAVING..." : "SAVE GARAGE DETAILS"}
+          </Text>
+        </Pressable>
+      </ScrollView>
+    </KeyboardScreen>
   );
 }
 
@@ -281,7 +307,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: SPACING.page,
     paddingTop: SPACING.xl,
-    paddingBottom: SPACING.xxl,
+    paddingBottom: 260,
   },
   kicker: TYPE.label,
   title: {

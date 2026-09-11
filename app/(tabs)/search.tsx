@@ -1,4 +1,5 @@
 import { COLORS, F, IMAGE_CACHE, SPACING, TYPE } from "@/constants/design";
+import { keyboardScrollProps } from "@/components/KeyboardScreen";
 import { hapticLight } from "@/hooks/useHaptics";
 import { S } from "@/constants/styles";
 import {
@@ -541,6 +542,7 @@ export default function SearchScreen() {
           showsHorizontalScrollIndicator={false}
           style={styles.cityScroller}
           contentContainerStyle={styles.cityRow}
+          {...keyboardScrollProps}
         >
           {CITIES.map((c) => {
             const active = city === c;
@@ -566,6 +568,7 @@ export default function SearchScreen() {
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.refineRow}
+            {...keyboardScrollProps}
           >
             <Text style={styles.resultCount}>
               {resultSummary || `${resultCount} results`}
@@ -600,6 +603,7 @@ export default function SearchScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.masonry}
+          {...keyboardScrollProps}
         >
           {bikeResults.length > 0 && (
             useListResults ? (

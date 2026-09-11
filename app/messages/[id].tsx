@@ -1,4 +1,5 @@
 import { COLORS, F, SPACING } from "@/constants/design";
+import { KeyboardScreen, keyboardScrollProps } from "@/components/KeyboardScreen";
 import { useAuth } from "@/context/AuthContext";
 import { hapticLight } from "@/hooks/useHaptics";
 import { formatUsd } from "@/lib/formatters";
@@ -30,8 +31,7 @@ import {
   Alert,
   FlatList,
   Image,
-  KeyboardAvoidingView,
-  Platform,
+  Linking,
   Pressable,
   StyleSheet,
   Text,
@@ -39,6 +39,18 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+const KEYSAVVY_BUYER_URL = "https://www.keysavvy.com/pay-private-seller";
+const KEYSAVVY_SELLER_URL = "https://www.keysavvy.com/get-paid";
+const USHIP_MOTORCYCLE_URL = "https://www.uship.com/motorcycles/";
+
+async function openPartnerLink(url: string) {
+  try {
+    await Linking.openURL(url);
+  } catch {
+    Alert.alert("Could not open link", "Try again in a moment.");
+  }
+}
 
 // ── Bubble ────────────────────────────────────────────────────────
 function Bubble({ msg }: { msg: ConversationMessage }) {
@@ -148,6 +160,56 @@ function OfferCard({
               : "This offer has been closed."}
         </Text>
       )}
+
+    </View>
+  );
+}
+
+function TransactionPartnerCard() {
+  return (
+    <View style={styles.transactionCard}>
+      <Text style={styles.transactionEyebrow}>Finish the deal</Text>
+      <Text style={styles.transactionTitle}>Secure payment, title, and shipping</Text>
+      <Text style={styles.transactionBody}>
+        Use KeySavvy for private-party vehicle payment and title paperwork. Use uShip if
+        the bike needs transport.
+      </Text>
+
+      <View style={styles.partnerList}>
+        <View style={styles.partnerItem}>
+          <Text style={styles.partnerName}>KeySavvy</Text>
+          <Text style={styles.partnerBody}>
+            Buyer payment, seller payout, lien payoff, bill of sale, and title transfer.
+          </Text>
+          <View style={styles.partnerActions}>
+            <Pressable
+              style={styles.partnerPrimaryButton}
+              onPress={() => openPartnerLink(KEYSAVVY_BUYER_URL)}
+            >
+              <Text style={styles.partnerPrimaryText}>Pay seller</Text>
+            </Pressable>
+            <Pressable
+              style={styles.partnerSecondaryButton}
+              onPress={() => openPartnerLink(KEYSAVVY_SELLER_URL)}
+            >
+              <Text style={styles.partnerSecondaryText}>Get paid</Text>
+            </Pressable>
+          </View>
+        </View>
+
+        <View style={styles.partnerItem}>
+          <Text style={styles.partnerName}>uShip</Text>
+          <Text style={styles.partnerBody}>
+            Compare motorcycle transport quotes for local, regional, or cross-country delivery.
+          </Text>
+          <Pressable
+            style={styles.partnerPrimaryButton}
+            onPress={() => openPartnerLink(USHIP_MOTORCYCLE_URL)}
+          >
+            <Text style={styles.partnerPrimaryText}>Get shipping quotes</Text>
+          </Pressable>
+        </View>
+      </View>
     </View>
   );
 }
@@ -178,6 +240,9 @@ const EMPTY_OFFERS: ListingOffer[] = [];
 function usefulName(value: string | undefined, fallbackLabel: "Buyer" | "Seller") {
   const trimmed = value?.trim();
   if (!trimmed || trimmed === fallbackLabel) return "";
+  if (fallbackLabel === "Buyer" && trimmed.toLowerCase() === "interested buyer") {
+    return "";
+  }
   return trimmed;
 }
 
@@ -513,7 +578,7 @@ export default function ConversationScreen() {
       hapticLight();
       const message =
         status === "accepted"
-          ? `Accepted offer: ${formatUsd(offer.amount)}. Let's coordinate pickup and payment.`
+          ? `Accepted offer: ${formatUsd(offer.amount)}. Let's use KeySavvy for payment and title, then coordinate pickup or shipping.`
           : `Declined offer: ${formatUsd(offer.amount)}. ${declineReason || DECLINE_REASONS[0]}`;
 
       try {
@@ -666,10 +731,7 @@ export default function ConversationScreen() {
       <View style={styles.divider} />
 
       {/* ── Messages + Compose ── */}
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === "ios" ? "padding" : undefined}
-      >
+      <KeyboardScreen style={styles.threadKeyboard}>
         <FlatList
           ref={listRef}
           data={messages}
@@ -685,15 +747,17 @@ export default function ConversationScreen() {
                     const isOfferBuyer = Boolean(member?.id && member.id === offer.buyerId);
 
                     return (
-                      <OfferCard
-                        key={offer.id}
-                        offer={offer}
-                        canRespond={isOfferSeller}
-                        canCancel={!isOfferSeller && isOfferBuyer}
-                        onAccept={() => respondToOffer(offer, "accepted")}
-                        onDecline={() => declineOffer(offer)}
-                        onCancel={() => cancelOffer(offer)}
-                      />
+                      <View key={offer.id} style={styles.offerWithTransaction}>
+                        <OfferCard
+                          offer={offer}
+                          canRespond={isOfferSeller}
+                          canCancel={!isOfferSeller && isOfferBuyer}
+                          onAccept={() => respondToOffer(offer, "accepted")}
+                          onDecline={() => declineOffer(offer)}
+                          onCancel={() => cancelOffer(offer)}
+                        />
+                        {offer.status === "accepted" ? <TransactionPartnerCard /> : null}
+                      </View>
                     );
                   })}
                   {historicalOffers.length > 0 ? (
@@ -720,6 +784,7 @@ export default function ConversationScreen() {
               listRef.current?.scrollToEnd({ animated: false });
             }
           }}
+          {...keyboardScrollProps}
         />
 
         <View style={styles.compose}>
@@ -742,7 +807,7 @@ export default function ConversationScreen() {
             <Text style={styles.sendBtnText}>SEND</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+      </KeyboardScreen>
     </SafeAreaView>
   );
 }
@@ -906,13 +971,16 @@ const styles = StyleSheet.create({
     marginRight: -10,
   },
   divider: { height: 0.5, backgroundColor: COLORS.divider },
+  threadKeyboard: {
+    flex: 1,
+  },
 
   // Messages
   messageList: {
     flexGrow: 1,
     paddingHorizontal: SPACING.page,
     paddingTop: 18,
-    paddingBottom: SPACING.lg,
+    paddingBottom: SPACING.xl,
     gap: 16,
   },
   bubbleRow: { alignItems: "flex-start", gap: 4 },
@@ -942,6 +1010,9 @@ const styles = StyleSheet.create({
   },
   offerList: {
     gap: 12,
+  },
+  offerWithTransaction: {
+    gap: 10,
   },
   offerCard: {
     borderWidth: 1,
@@ -1086,6 +1157,90 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: F.bold,
     color: COLORS.white,
+  },
+  transactionCard: {
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    borderRadius: 6,
+    padding: 14,
+    backgroundColor: COLORS.white,
+    gap: 10,
+  },
+  transactionEyebrow: {
+    fontSize: 10,
+    lineHeight: 13,
+    fontFamily: F.monoBold,
+    letterSpacing: 1.2,
+    color: COLORS.textMuted,
+    textTransform: "uppercase",
+  },
+  transactionTitle: {
+    fontSize: 18,
+    lineHeight: 22,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+  },
+  transactionBody: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontFamily: F.regular,
+    color: COLORS.textSecondary,
+  },
+  partnerList: {
+    gap: 10,
+  },
+  partnerItem: {
+    borderTopWidth: 1,
+    borderTopColor: COLORS.divider,
+    paddingTop: 10,
+    gap: 8,
+  },
+  partnerName: {
+    fontSize: 15,
+    lineHeight: 19,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+  },
+  partnerBody: {
+    fontSize: 12,
+    lineHeight: 17,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+  },
+  partnerActions: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  partnerPrimaryButton: {
+    minHeight: 40,
+    borderRadius: 6,
+    backgroundColor: COLORS.black,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  partnerPrimaryText: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontFamily: F.bold,
+    color: COLORS.white,
+    textAlign: "center",
+  },
+  partnerSecondaryButton: {
+    minHeight: 40,
+    borderWidth: 1,
+    borderColor: COLORS.black,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 12,
+  },
+  partnerSecondaryText: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    textAlign: "center",
   },
 
   emptyThread: {

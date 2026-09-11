@@ -13,11 +13,14 @@ import BottomSheet, {
 import { useStripe } from "@stripe/stripe-react-native";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useMemo, useRef, useState } from "react";
-import { Alert, Pressable, StyleSheet, Text, View } from "react-native";
+import { Alert, Linking, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const PAYMENT_UNAVAILABLE_MESSAGE =
-  "Payment is unavailable. Try again in a moment.";
+  "We could not open checkout. Try again, or contact support if this keeps happening.";
+const SUPPORT_EMAIL = "customerservice@croigslist.com";
+
+type MembershipCheckResult = "found" | "not_found";
 
 function getPaymentErrorMessage(error: unknown) {
   const message =
@@ -35,7 +38,7 @@ function getPaymentErrorMessage(error: unknown) {
     lowerMessage.includes("stripeprovider") ||
     lowerMessage.includes("not initialized")
   ) {
-    return "Payment is not configured in this build. Install the latest build and try again.";
+    return "Checkout is not enabled in this app build. Install the latest version and try again.";
   }
 
   if (
@@ -43,7 +46,7 @@ function getPaymentErrorMessage(error: unknown) {
     lowerMessage.includes("missing function secrets") ||
     lowerMessage.includes("missing stripe")
   ) {
-    return "Payment is not configured on the server yet.";
+    return "Checkout is not fully set up yet. Please try again after we finish configuring payments.";
   }
 
   if (lowerMessage.includes("not authenticated")) {
@@ -56,7 +59,7 @@ function getPaymentErrorMessage(error: unknown) {
     lowerMessage.includes("non-2xx") ||
     lowerMessage.includes("edge function")
   ) {
-    return "Could not reach payment services. Check your connection and try again.";
+    return "We could not reach checkout. Check your connection and try again.";
   }
 
   if (
@@ -64,7 +67,7 @@ function getPaymentErrorMessage(error: unknown) {
     lowerMessage.includes("payment method") ||
     lowerMessage.includes("declined")
   ) {
-    return "That payment method did not work. Try another card or payment method.";
+    return "That payment method was not accepted. Try another card.";
   }
 
   if (lowerMessage.includes("stripe")) return PAYMENT_UNAVAILABLE_MESSAGE;
@@ -89,6 +92,7 @@ export function PaymentMembershipSheet() {
   const [isOpening, setIsOpening] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [checkResult, setCheckResult] = useState<MembershipCheckResult | null>(null);
 
   const syncPaidMembership = async (subscriptionId: string) => {
     for (let attempt = 0; attempt < 4; attempt += 1) {
@@ -163,7 +167,8 @@ export function PaymentMembershipSheet() {
     setError(null);
     setIsRefreshing(true);
     try {
-      await refreshMemberProfile();
+      const status = await refreshMemberProfile();
+      setCheckResult(status === "approved" ? "found" : "not_found");
     } catch (refreshError) {
       setError(
         getPaymentErrorMessage(refreshError),
@@ -186,6 +191,26 @@ export function PaymentMembershipSheet() {
         },
       ],
     );
+  };
+
+  const continueIntoApp = () => {
+    setCheckResult(null);
+    if (returnTo?.startsWith("/")) {
+      router.replace(returnTo as never);
+      return;
+    }
+    router.replace("/(tabs)");
+  };
+
+  const contactSupport = () => {
+    Linking.openURL(`mailto:${SUPPORT_EMAIL}`).catch(() => {
+      Alert.alert("Contact customer service", SUPPORT_EMAIL);
+    });
+  };
+
+  const startMembershipFromResult = () => {
+    setCheckResult(null);
+    openCheckout();
   };
 
   const renderBackdrop = useCallback(
@@ -261,6 +286,48 @@ export function PaymentMembershipSheet() {
           </Pressable>
         </View>
       </BottomSheetView>
+
+      <Modal
+        visible={checkResult !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setCheckResult(null)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View style={styles.resultModal}>
+            {checkResult === "found" ? (
+              <>
+                <Text style={styles.modalTitle}>Welcome back</Text>
+                <Text style={styles.modalBody}>
+                  We found your active Croigslist membership.
+                </Text>
+                <Pressable style={styles.modalPrimaryButton} onPress={continueIntoApp}>
+                  <Text style={styles.modalPrimaryButtonText}>Continue into Croig</Text>
+                </Pressable>
+              </>
+            ) : (
+              <>
+                <Text style={styles.modalTitle}>No subscription found</Text>
+                <Text style={styles.modalBody}>
+                  We could not find an active subscription for this account.
+                </Text>
+                <Pressable style={styles.modalPrimaryButton} onPress={startMembershipFromResult}>
+                  <Text style={styles.modalPrimaryButtonText}>Start your membership</Text>
+                </Pressable>
+                <Pressable style={styles.modalSecondaryButton} onPress={contactSupport}>
+                  <Text style={styles.modalSecondaryButtonText}>Contact @customerservice</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.modalSecondaryButton}
+                  onPress={() => setCheckResult(null)}
+                >
+                  <Text style={styles.modalSecondaryButtonText}>Exit</Text>
+                </Pressable>
+              </>
+            )}
+          </View>
+        </View>
+      </Modal>
     </BottomSheet>
   );
 }
@@ -366,5 +433,55 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: F.regular,
     color: COLORS.textFaint,
+  },
+  modalBackdrop: {
+    flex: 1,
+    backgroundColor: COLORS.overlay50,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: SPACING.lg,
+  },
+  resultModal: {
+    width: "100%",
+    maxWidth: 340,
+    borderRadius: 18,
+    backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.lg,
+    alignItems: "center",
+  },
+  modalTitle: {
+    fontSize: 24,
+    lineHeight: 29,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    textAlign: "center",
+  },
+  modalBody: {
+    fontSize: 15,
+    lineHeight: 21,
+    fontFamily: F.regular,
+    color: COLORS.textSecondary,
+    textAlign: "center",
+    marginTop: SPACING.sm,
+    marginBottom: SPACING.lg,
+  },
+  modalPrimaryButton: {
+    ...S.primaryButton,
+    width: "100%",
+    minHeight: 52,
+    borderRadius: 16,
+  },
+  modalPrimaryButtonText: S.primaryButtonText,
+  modalSecondaryButton: {
+    minHeight: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    marginTop: SPACING.xs,
+  },
+  modalSecondaryButtonText: {
+    fontSize: 15,
+    fontFamily: F.semibold,
+    color: COLORS.textMuted,
   },
 });

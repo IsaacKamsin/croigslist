@@ -424,12 +424,12 @@ Deno.serve(async (req) => {
     const subscriptionParams = new URLSearchParams({
       customer: customerId,
       "items[0][price]": priceId,
+      payment_behavior: "default_incomplete",
       trial_period_days: "3",
       "payment_settings[save_default_payment_method]": "on_subscription",
       "payment_settings[payment_method_types][0]": "card",
-      "payment_settings[payment_method_types][1]": "cashapp",
-      "payment_settings[payment_method_types][2]": "us_bank_account",
       "billing_mode[type]": "flexible",
+      "trial_settings[end_behavior][missing_payment_method]": "cancel",
       "metadata[supabase_user_id]": user.id,
     });
     subscriptionParams.append("expand[]", "latest_invoice.confirmation_secret");

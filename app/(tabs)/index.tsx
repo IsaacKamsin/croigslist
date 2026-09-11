@@ -32,6 +32,7 @@ import { shareSellerInvite } from "@/lib/share";
 import {
   BottomSheetBackdrop,
   BottomSheetModal,
+  BottomSheetTextInput,
   BottomSheetView,
   type BottomSheetBackdropProps,
 } from "@gorhom/bottom-sheet";
@@ -49,7 +50,6 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   Modal,
   View,
 } from "react-native";
@@ -892,6 +892,9 @@ function BuilderDashboard({
         enablePanDownToClose
         backgroundStyle={s.offerSheetBg}
         handleIndicatorStyle={s.offerSheetHandle}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetView style={s.offerSheet}>
           <Text style={s.offerSheetEyebrow}>Offer</Text>
@@ -936,7 +939,7 @@ function BuilderDashboard({
                   );
                 })}
               </View>
-              <TextInput
+              <BottomSheetTextInput
                 value={customDenyReason}
                 onChangeText={setCustomDenyReason}
                 placeholder="Write a different reason..."

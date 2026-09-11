@@ -1,4 +1,5 @@
 import { useFonts } from "expo-font";
+import * as Notifications from "expo-notifications";
 import {
   Stack,
   useGlobalSearchParams,
@@ -7,8 +8,8 @@ import {
   useSegments,
 } from "expo-router";
 import { StatusBar } from "expo-status-bar";
-import { useEffect, useState } from "react";
-import { Keyboard, View } from "react-native";
+import { useEffect, useRef, useState } from "react";
+import { View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { StripeProvider } from "@stripe/stripe-react-native";
@@ -22,6 +23,13 @@ import {
 import { COLORS, FONTS } from "@/constants/design";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 
+type NotificationData = Record<string, unknown>;
+
+function getStringNotificationData(data: NotificationData, key: string) {
+  const value = data[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
 function AuthGate({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, isLoading, memberStatus } = useAuth();
   const segments = useSegments();
@@ -29,6 +37,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const rootNavigationState = useRootNavigationState();
   const [isReady, setIsReady] = useState(false);
+  const handledNotificationIdRef = useRef<string | null>(null);
 
   useEffect(() => {
     setIsReady(true);
@@ -58,6 +67,54 @@ function AuthGate({ children }: { children: React.ReactNode }) {
     returnTo,
     segments,
     isReady,
+    router,
+  ]);
+
+  useEffect(() => {
+    if (!isReady || isLoading || !rootNavigationState?.key || !isAuthenticated) {
+      return;
+    }
+
+    const handleNotificationResponse = (
+      response: Notifications.NotificationResponse | null,
+    ) => {
+      if (!response) return;
+
+      const notificationId = response.notification.request.identifier;
+      if (handledNotificationIdRef.current === notificationId) return;
+      handledNotificationIdRef.current = notificationId;
+
+      const data = response.notification.request.content.data as NotificationData;
+      const listingId = getStringNotificationData(data, "listingId");
+      if (listingId) {
+        router.push({ pathname: "/listing/[id]", params: { id: listingId } });
+        return;
+      }
+
+      const conversationId = getStringNotificationData(data, "conversationId");
+      if (conversationId) {
+        router.push({ pathname: "/messages/[id]", params: { id: conversationId } });
+      }
+    };
+
+    const subscription = Notifications.addNotificationResponseReceivedListener(
+      handleNotificationResponse,
+    );
+
+    Notifications.getLastNotificationResponseAsync()
+      .then(handleNotificationResponse)
+      .catch((error) => {
+        console.warn("Notification deep link lookup failed.", error);
+      });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [
+    isAuthenticated,
+    isLoading,
+    isReady,
+    rootNavigationState?.key,
     router,
   ]);
 
@@ -142,10 +199,6 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <View
         style={{ flex: 1 }}
-        onStartShouldSetResponderCapture={() => {
-          Keyboard.dismiss();
-          return false;
-        }}
       >
         <StripeProvider
           publishableKey={stripePublishableKey}
@@ -191,11 +244,20 @@ export default function RootLayout() {
                   />
 
                   <Stack.Screen
+                    name="messages/[id]"
+                    options={{
+                      headerShown: false,
+                      animation: "slide_from_right",
+                    }}
+                  />
+
+                  <Stack.Screen
                     name="builder/[id]"
                     options={{
                       headerShown: true,
                       headerTitle: "",
                       headerBackTitle: "",
+                      headerBackButtonDisplayMode: "minimal",
                       headerStyle: { backgroundColor: COLORS.bg },
                       headerTintColor: COLORS.black,
                       headerShadowVisible: false,

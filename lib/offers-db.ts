@@ -354,7 +354,7 @@ export async function fetchConversationOffers(
 
   const structuredOffers = ((data ?? []) as OfferRow[]).map(offerFromRow);
   const messageOffers = await fetchConversationOfferMessages(conversationId);
-  return normalizePendingOffers(mergeOffers(structuredOffers, messageOffers));
+  return addBuyerNames(normalizePendingOffers(mergeOffers(structuredOffers, messageOffers)));
 }
 
 export async function fetchListingTopOffer(listingId?: string): Promise<number | null> {
@@ -603,18 +603,28 @@ function mergeOffers(structuredOffers: ListingOffer[], messageOffers: ListingOff
 async function addBuyerNames(offers: ListingOffer[]) {
   const buyerIds = Array.from(new Set(offers.map((offer) => offer.buyerId).filter(Boolean)));
   if (buyerIds.length === 0) return offers;
+  const buyerNames = new Map<string, string>();
+  const addBuyerRows = (rows: OfferProfileRow[]) => {
+    for (const buyer of rows) {
+      const name = buyer.full_name || buyer.handle;
+      if (name) buyerNames.set(buyer.id, name);
+    }
+  };
 
   const { data } = await supabase
     .from("public_profiles")
     .select("id, full_name, handle")
     .in("id", buyerIds);
+  addBuyerRows((data ?? []) as OfferProfileRow[]);
 
-  const buyerNames = new Map(
-    ((data ?? []) as OfferProfileRow[]).map((buyer) => [
-      buyer.id,
-      buyer.full_name || buyer.handle || "Buyer",
-    ]),
-  );
+  const missingBuyerIds = buyerIds.filter((id) => !buyerNames.has(id));
+  if (missingBuyerIds.length > 0) {
+    const { data: counterpartyProfiles } = await supabase
+      .from("profiles")
+      .select("id, full_name, handle")
+      .in("id", missingBuyerIds);
+    addBuyerRows((counterpartyProfiles ?? []) as OfferProfileRow[]);
+  }
 
   return offers.map((offer) => ({
     ...offer,

@@ -82,7 +82,7 @@ interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;
   signOut: () => Promise<void>;
   applyForMembership: (application: AccountApplication) => Promise<ApplyResult>;
-  refreshMemberProfile: () => Promise<void>;
+  refreshMemberProfile: () => Promise<MemberStatus>;
   setActiveView: (view: MemberType) => void;
   toggleActiveView: () => void;
 }
@@ -116,6 +116,10 @@ function getEffectiveMemberStatus(profile: ProfileRow | null): MemberStatus {
   if (subscriptionStatus === "trialing" && status === "approved") return "approved";
   if (status === "approved") return "approved";
   return status;
+}
+
+function isObfuscatedExistingSignup(user: User) {
+  return Array.isArray(user.identities) && user.identities.length === 0;
 }
 
 function memberFromProfile(user: User, profile: ProfileRow | null): Member {
@@ -243,7 +247,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         activeView: "buyer",
         session: null,
       });
-      return;
+      return "none" satisfies MemberStatus;
     }
 
     try {
@@ -270,6 +274,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           );
         });
       }
+      return memberStatus;
     } catch {
       const member = memberFromProfile(session.user, null);
       if (!member.avatarUrl) {
@@ -283,6 +288,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         activeView: member.type,
         session,
       });
+      return "pending_payment" satisfies MemberStatus;
     }
   }, []);
 
@@ -324,6 +330,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (error) throw error;
+    if (!data.session) {
+      throw new Error("Invalid login credentials.");
+    }
     await setSessionState(data.session);
   }, [setSessionState]);
 
@@ -338,7 +347,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const {
       data: { session },
     } = await supabase.auth.getSession();
-    await setSessionState(session);
+    return setSessionState(session);
   }, [setSessionState]);
 
   const applyForMembership = useCallback(
@@ -363,6 +372,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (error) throw error;
       if (!data.user) throw new Error("Supabase did not return a user.");
+      if (isObfuscatedExistingSignup(data.user)) {
+        throw new Error("User already registered.");
+      }
 
       if (!data.session) {
         setState((prev) => ({ ...prev, isLoading: false }));

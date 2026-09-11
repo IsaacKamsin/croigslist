@@ -1,7 +1,8 @@
-import { View, Text, TextInput, StyleSheet, Pressable, ScrollView, KeyboardAvoidingView, Platform, Linking } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable, ScrollView, Linking } from 'react-native';
 import { useState } from 'react';
 import { useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { KeyboardScreen, keyboardScrollProps } from '@/components/KeyboardScreen';
 import { MemberType, useAuth } from '@/context/AuthContext';
 import { COLORS, F, SPACING, TYPE } from '@/constants/design';
 import { S } from '@/constants/styles';
@@ -11,9 +12,26 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Controller, useForm } from 'react-hook-form';
 import { z } from 'zod';
 
+const emailFormatSchema = z.string().email();
+
 const applySchema = z.object({
-  email: z.string().trim().email('Enter a valid email address.'),
-  password: z.string().min(6, 'Password must be at least 6 characters.'),
+  email: z.string().trim().superRefine((value, ctx) => {
+    if (!value) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Email is required.",
+      });
+      return;
+    }
+
+    if (!emailFormatSchema.safeParse(value).success) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Invalid email format.",
+      });
+    }
+  }),
+  password: z.string().min(1, 'Password is required.').min(6, 'Password must be at least 6 characters.'),
   type: z.enum(['buyer', 'builder']),
 });
 
@@ -106,14 +124,13 @@ export default function ApplyScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
-      <KeyboardAvoidingView
-        style={{ flex: 1 }}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      >
+      <KeyboardScreen style={styles.keyboard}>
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
+          {...keyboardScrollProps}
+          keyboardDismissMode="none"
+          keyboardShouldPersistTaps="always"
         >
           <Pressable onPress={() => backOrReplace(router, '/(auth)/welcome')} style={styles.backBtn}>
             <Text style={styles.backText}>X</Text>
@@ -199,7 +216,7 @@ export default function ApplyScreen() {
             </Text>
           </Pressable>
         </ScrollView>
-      </KeyboardAvoidingView>
+      </KeyboardScreen>
     </SafeAreaView>
   );
 }
@@ -207,6 +224,9 @@ export default function ApplyScreen() {
 const styles = StyleSheet.create({
   container: {
     ...S.screenContainer,
+  },
+  keyboard: {
+    flex: 1,
   },
   scrollContent: {
     flexGrow: 1,

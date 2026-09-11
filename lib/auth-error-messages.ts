@@ -27,19 +27,11 @@ export function getAuthErrorMessage(error: unknown) {
   }
 
   if (
-    lowerMessage.includes("missing exp") ||
-    lowerMessage.includes("jwt") ||
-    lowerMessage.includes("session")
+    lowerMessage.includes("auth session missing") ||
+    lowerMessage.includes("session missing") ||
+    lowerMessage.includes("no session")
   ) {
-    return "Your sign-in session expired. Open the latest email link or sign in again.";
-  }
-
-  if (
-    lowerMessage.includes("network") ||
-    lowerMessage.includes("fetch") ||
-    lowerMessage.includes("failed to fetch")
-  ) {
-    return "Could not reach Croigslist. Check your connection and try again.";
+    return "Could not sign in. Check your email and password, then try again.";
   }
 
   if (
@@ -47,6 +39,24 @@ export function getAuthErrorMessage(error: unknown) {
     lowerMessage.includes("supabase is not configured")
   ) {
     return "Login is not configured in this build. Install the latest build and try again.";
+  }
+
+  if (
+    lowerMessage.includes("network") ||
+    lowerMessage.includes("fetch") ||
+    lowerMessage.includes("failed to fetch")
+  ) {
+    return "No internet connection. Check your connection and try again.";
+  }
+
+  if (
+    lowerMessage.includes("missing exp claim") ||
+    lowerMessage.includes("missing exp.") ||
+    lowerMessage.includes("jwt expired") ||
+    lowerMessage.includes("invalid jwt") ||
+    lowerMessage.includes("session expired")
+  ) {
+    return "Your sign-in session expired. Open the latest email link or sign in again.";
   }
 
   if (lowerMessage.includes("rate limit") || lowerMessage.includes("too many")) {
@@ -76,8 +86,16 @@ export function getSignupErrorMessage(error: unknown) {
     return "That invite code is invalid, expired, or already used.";
   }
 
+  if (
+    lowerMessage.includes("network") ||
+    lowerMessage.includes("fetch") ||
+    lowerMessage.includes("failed to fetch")
+  ) {
+    return "No internet connection. Check your connection and try again.";
+  }
+
   if (lowerMessage.includes("already registered") || lowerMessage.includes("already exists")) {
-    return "That email already has an account. Sign in instead.";
+    return "An account already exists for that email. Sign in instead.";
   }
 
   if (lowerMessage.includes("password")) {

@@ -208,6 +208,16 @@ function hasRealListingOwner(row: ListingRow) {
   return Boolean(row.seller_id || row.shop_id);
 }
 
+async function notifyNewListing(listingId: string) {
+  const { error } = await supabase.functions.invoke("notify-new-listing", {
+    body: { listingId },
+  });
+
+  if (error) {
+    console.warn("New listing notification fan-out failed.", error.message);
+  }
+}
+
 function activeListingCounts(rows: ListingRow[], ownerKey: "seller_id" | "shop_id") {
   const counts = new Map<string, number>();
   for (const row of rows) {
@@ -572,10 +582,14 @@ export async function createListing(input: CreateListingInput): Promise<Registry
       .single<ListingRow>();
 
     if (fallbackError) throw fallbackError;
-    return listingFromRow(fallbackData);
+    const listing = listingFromRow(fallbackData);
+    notifyNewListing(listing.id).catch(() => undefined);
+    return listing;
   }
 
-  return listingFromRow(data);
+  const listing = listingFromRow(data);
+  notifyNewListing(listing.id).catch(() => undefined);
+  return listing;
 }
 
 export async function fetchListingById(id: string): Promise<RegistryListing | null> {

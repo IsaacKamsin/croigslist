@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import { KeyboardScreen, keyboardScrollProps } from '@/components/KeyboardScreen';
 import { hapticLight, hapticMedium, hapticSuccess, hapticWarning } from '@/hooks/useHaptics';
 import { importFromUrl } from '@/hooks/useMarketplaceImport';
 import { COLORS, F, IMAGE_CACHE, SPACING, TYPE } from '@/constants/design';
@@ -83,6 +84,7 @@ export default function CreateListingScreen() {
   const router = useRouter();
   const { mode: initialMode, source } = useLocalSearchParams<{ mode?: string; source?: string }>();
   const queryClient = useQueryClient();
+  const scrollRef = useRef<ScrollView>(null);
   const {
     control,
     handleSubmit,
@@ -290,13 +292,23 @@ export default function CreateListingScreen() {
     }
   };
 
+  const scrollToFormBottom = () => {
+    setTimeout(() => {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }, 120);
+  };
+
   return (
     <View style={styles.container}>
+      <KeyboardScreen style={styles.container}>
       <ScrollView
+        ref={scrollRef}
         style={styles.container}
         contentContainerStyle={styles.content}
         showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
+        {...keyboardScrollProps}
+        keyboardDismissMode="none"
+        keyboardShouldPersistTaps="always"
       >
       <View style={styles.header}>
         <Text style={styles.headerTitle}>Sell a bike</Text>
@@ -369,6 +381,10 @@ export default function CreateListingScreen() {
                     placeholderTextColor={COLORS.textFaint}
                     autoCapitalize="none"
                     autoCorrect={false}
+                    autoComplete="url"
+                    contextMenuHidden={false}
+                    selectTextOnFocus={false}
+                    textContentType="URL"
                     keyboardType="url"
                     editable={!isBusy}
                   />
@@ -607,6 +623,7 @@ export default function CreateListingScreen() {
             multiline
             numberOfLines={5}
             textAlignVertical="top"
+            onFocus={scrollToFormBottom}
             editable={!isBusy}
           />
         )}
@@ -625,6 +642,21 @@ export default function CreateListingScreen() {
       ) : null}
       </ScrollView>
 
+      {showListingDetails ? (
+      <View style={styles.bottomBar}>
+        <Pressable
+          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
+          onPress={handleSubmit(submitListing)}
+          disabled={isBusy}
+        >
+          <Text style={styles.submitButtonText}>
+            {isSubmitting ? 'Creating...' : 'Post listing'}
+          </Text>
+        </Pressable>
+      </View>
+      ) : null}
+      </KeyboardScreen>
+
       {isBusy ? (
         <View style={styles.busyOverlay}>
           <View style={styles.busyCard}>
@@ -639,20 +671,6 @@ export default function CreateListingScreen() {
           </View>
         </View>
       ) : null}
-
-      {showListingDetails ? (
-      <View style={styles.bottomBar}>
-        <Pressable
-          style={[styles.submitButton, isSubmitting && styles.submitButtonDisabled]}
-          onPress={handleSubmit(submitListing)}
-          disabled={isBusy}
-        >
-          <Text style={styles.submitButtonText}>
-            {isSubmitting ? 'Creating...' : 'Post listing'}
-          </Text>
-        </Pressable>
-      </View>
-      ) : null}
     </View>
   );
 }
@@ -662,7 +680,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: SPACING.page,
     paddingTop: SPACING.sm,
-    paddingBottom: 132,
+    paddingBottom: 260,
   },
   header: {
     paddingTop: SPACING.md,

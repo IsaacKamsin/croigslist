@@ -68,6 +68,16 @@ type ConversationNotificationRow = {
   listing?: ThreadListingRow | ThreadListingRow[] | null;
 };
 
+type ConversationLookupRow = {
+  id: string;
+  participant_id: string | null;
+};
+
+type ConversationListingRow = {
+  seller_id: string | null;
+  seller_name: string | null;
+};
+
 type ProfileNameRow = {
   id: string;
   full_name: string | null;
@@ -186,6 +196,11 @@ function buyerProfileName(profile?: ProfileNameRow) {
   return profile?.full_name || meaningfulHandle(profile?.handle) || "";
 }
 
+function isGenericBuyerName(value?: string | null) {
+  const normalized = value?.trim().toLowerCase();
+  return !normalized || normalized === "buyer" || normalized === "interested buyer";
+}
+
 function meaningfulHandle(handle?: string | null) {
   if (!handle) return "";
   return /^[a-f0-9]{8}$/i.test(handle) ? "" : handle;
@@ -233,6 +248,22 @@ function previewTextForThread(
 async function fetchProfileNames(profileIds: string[]) {
   const profiles = new Map<string, ProfileNameRow>();
   if (profileIds.length === 0) return profiles;
+  const addProfiles = (rows: ProfileNameRow[]) => {
+    for (const profile of rows) {
+      profiles.set(profile.id, profile);
+    }
+  };
+  const fetchCounterpartyProfiles = async () => {
+    const missingIds = profileIds.filter((id) => !profiles.has(id));
+    if (missingIds.length === 0) return;
+
+    const { data } = await supabase
+      .from("profiles")
+      .select("id, full_name, handle, garage_name, avatar_url, garage_image_url")
+      .in("id", missingIds);
+
+    addProfiles((data ?? []) as ProfileNameRow[]);
+  };
 
   // public_profiles exposes names/avatars for every member but no contact
   // details; the profiles table itself is now readable only by the owner and
@@ -243,22 +274,28 @@ async function fetchProfileNames(profileIds: string[]) {
     .in("id", profileIds);
 
   if (!error) {
-    for (const profile of (data ?? []) as ProfileNameRow[]) {
-      profiles.set(profile.id, profile);
-    }
+    addProfiles((data ?? []) as ProfileNameRow[]);
+    await fetchCounterpartyProfiles();
     return profiles;
   }
 
-  if (!isMissingProfileGarageName(error)) return profiles;
+  if (!isMissingProfileGarageName(error)) {
+    await fetchCounterpartyProfiles();
+    return profiles;
+  }
 
   const fallback = await supabase
     .from("public_profiles")
     .select("id, full_name, handle")
     .in("id", profileIds);
 
-  for (const profile of (fallback.data ?? []) as ProfileNameRow[]) {
-    profiles.set(profile.id, { ...profile, garage_name: null });
-  }
+  addProfiles(
+    ((fallback.data ?? []) as ProfileNameRow[]).map((profile) => ({
+      ...profile,
+      garage_name: null,
+    })),
+  );
+  await fetchCounterpartyProfiles();
 
   return profiles;
 }
@@ -426,7 +463,11 @@ export async function fetchMessageThreads(
       "Seller";
     const buyerName =
       buyerProfileName(profiles.get(buyerId ?? "")) ||
-      (row.participant_name && row.participant_name !== sellerName ? row.participant_name : "") ||
+      (row.participant_name &&
+      row.participant_name !== sellerName &&
+      !isGenericBuyerName(row.participant_name)
+        ? row.participant_name
+        : "") ||
       "Interested buyer";
     const viewingAsSeller = Boolean(user?.id && sellerId === user.id);
     const counterpartyProfile = profiles.get(counterpartyId ?? "");
@@ -511,7 +552,11 @@ export async function fetchConversationContext(
     "Seller";
   const buyerName =
     buyerProfileName(profiles.get(buyerId ?? "")) ||
-    (data.participant_name && data.participant_name !== sellerName ? data.participant_name : "") ||
+    (data.participant_name &&
+    data.participant_name !== sellerName &&
+    !isGenericBuyerName(data.participant_name)
+      ? data.participant_name
+      : "") ||
     "Buyer";
   const viewingAsSeller = Boolean(user?.id && sellerId === user.id);
   const counterpartyName =
@@ -583,30 +628,51 @@ export async function startConversation({
   if (userError) throw userError;
   if (!user) throw new Error("Sign in required.");
 
+  const { data: listingParticipant } = listingId
+    ? await supabase
+        .from("listings")
+        .select("seller_id, seller_name")
+        .eq("id", listingId)
+        .maybeSingle<ConversationListingRow>()
+    : { data: null };
+
   // conversations.participant_id is a FK to auth.users, but a listing's "sellerId"
   // can be a shop id (registry-db falls back to shop_id). Passing one of those
   // violated the FK, and the old catch-all retry then created the thread with a
-  // null participant -- which the conversations SELECT policy hides from the seller
-  // forever. Resolve the id against profiles first and only link a real member.
-  const participantProfile = participantId
-    ? (await fetchProfileNames([participantId])).get(participantId)
+  // null participant. For listing conversations, trust listings.seller_id because
+  // that column is the auth user FK; directory visibility should not decide
+  // whether the seller can receive/read the thread.
+  const listingParticipantId = listingParticipant?.seller_id ?? null;
+  const profileLookupId = listingParticipantId ?? participantId;
+  const participantProfile = profileLookupId
+    ? (await fetchProfileNames([profileLookupId])).get(profileLookupId)
     : undefined;
-  const linkedParticipantId = participantProfile ? participantId ?? null : null;
+  const linkedParticipantId = listingParticipantId
+    ? listingParticipantId
+    : participantProfile
+      ? participantId ?? null
+      : null;
+  const fallbackParticipantName =
+    listingParticipant?.seller_name || participantName;
   const resolvedParticipantName =
-    (!participantName || participantName === "Seller"
+    (!fallbackParticipantName || fallbackParticipantName === "Seller"
       ? participantProfile?.garage_name ||
         participantProfile?.full_name ||
         participantProfile?.handle
-      : participantName) ||
-    participantName ||
+      : fallbackParticipantName) ||
+    fallbackParticipantName ||
     "Seller";
+
+  if (listingId && !linkedParticipantId) {
+    throw new Error("This listing is not attached to a seller account.");
+  }
 
   // Dedupe on identity, not on the display name: threads created before the name
   // could be resolved are stored as "Seller", so matching on the resolved name
   // missed them and opened a second thread for the same listing.
   let query = supabase
     .from("conversations")
-    .select("id")
+    .select("id, participant_id")
     .eq("owner_id", user.id)
     .limit(1);
 
@@ -625,7 +691,20 @@ export async function startConversation({
     }
     throw existingError;
   }
-  if (existing?.[0]?.id) return existing[0].id as string;
+  const existingConversation = existing?.[0] as ConversationLookupRow | undefined;
+  if (existingConversation?.id) {
+    if (linkedParticipantId && existingConversation.participant_id !== linkedParticipantId) {
+      await supabase
+        .from("conversations")
+        .update({
+          participant_id: linkedParticipantId,
+          participant_name: resolvedParticipantName,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", existingConversation.id);
+    }
+    return existingConversation.id;
+  }
 
   const { data, error } = await supabase
     .from("conversations")

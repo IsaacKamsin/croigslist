@@ -1,5 +1,6 @@
 import { COLORS, F, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
+import { KeyboardScreen, keyboardScrollProps } from "@/components/KeyboardScreen";
 import { useAuth } from "@/context/AuthContext";
 import { getAuthErrorMessage } from "@/lib/auth-error-messages";
 import { backOrReplace } from "@/lib/navigation";
@@ -7,9 +8,8 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "expo-router";
 import { Controller, useForm } from "react-hook-form";
 import {
-  KeyboardAvoidingView,
-  Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -51,10 +51,14 @@ export default function LoginScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView
-        style={styles.inner}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
-      >
+      <KeyboardScreen style={styles.inner}>
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          {...keyboardScrollProps}
+          keyboardDismissMode="none"
+          keyboardShouldPersistTaps="always"
+        >
         {/* Back */}
         <Pressable
           onPress={() => backOrReplace(router, "/(auth)/welcome")}
@@ -127,7 +131,8 @@ export default function LoginScreen() {
             <Text style={styles.forgotText}>Forgot password?</Text>
           </Pressable>
         </View>
-      </KeyboardAvoidingView>
+        </ScrollView>
+      </KeyboardScreen>
     </SafeAreaView>
   );
 }
@@ -139,6 +144,9 @@ const styles = StyleSheet.create({
   },
   inner: {
     flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
   },
 
   // Back

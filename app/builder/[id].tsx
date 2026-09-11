@@ -11,6 +11,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Dimensions,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -38,7 +39,7 @@ type SellerProfile = {
 export default function BuilderProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
-  const { data: builder, isPending } = useQuery({
+  const { data: builder, isPending, isRefetching, refetch } = useQuery({
     queryKey: ["builder-profile", id],
     queryFn: () => fetchBuilderProfile(id) as Promise<SellerProfile | null>,
     enabled: Boolean(id),
@@ -83,7 +84,17 @@ export default function BuilderProfileScreen() {
   const soldListings = builder.listings.filter((item) => item.status === "sold");
 
   return (
-    <ScrollView style={styles.container} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={styles.container}
+      showsVerticalScrollIndicator={false}
+      refreshControl={
+        <RefreshControl
+          refreshing={isRefetching}
+          onRefresh={refetch}
+          tintColor={COLORS.black}
+        />
+      }
+    >
       <View style={styles.profileBlock}>
         <View style={styles.profileTop}>
           <View style={styles.avatar}>

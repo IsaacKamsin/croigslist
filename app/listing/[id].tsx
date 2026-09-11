@@ -5,7 +5,6 @@ import { useAuth } from "@/context/AuthContext";
 import { S } from "@/constants/styles";
 import {
   createListingOffer,
-  fetchListingTopOffer,
   fetchMyPendingOfferForListing,
 } from "@/lib/offers-db";
 import { fetchListingById } from "@/lib/registry-db";
@@ -13,15 +12,28 @@ import { formatUsd } from "@/lib/formatters";
 import { sendConversationMessage, startConversation } from "@/lib/messages-db";
 import { backOrReplace } from "@/lib/navigation";
 import {
+  messageListing,
+  shareListing,
+  shareListingToInstagramOrMore,
+  shareListingToWhatsApp,
+} from "@/lib/share";
+import {
   BottomSheetBackdrop,
   BottomSheetModal,
+  BottomSheetTextInput,
   BottomSheetView,
   type BottomSheetBackdropProps,
 } from "@gorhom/bottom-sheet";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { CaretLeftIcon } from "phosphor-react-native";
+import {
+  ChatCircleTextIcon,
+  InstagramLogoIcon,
+  ShareFatIcon,
+  CaretLeftIcon,
+  ShareNetworkIcon,
+} from "phosphor-react-native";
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Alert,
@@ -31,13 +43,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const { width } = Dimensions.get("window");
-const FOOTER_BUTTON_WIDTH = Math.min(190, Math.max(156, width * 0.42));
+const FOOTER_BUTTON_WIDTH = Math.min(166, Math.max(138, width * 0.36));
+const MESSAGE_BUTTON_WIDTH = 78;
 
 function formatOfferInput(value: string) {
   const digits = value.replace(/[^\d]/g, "");
@@ -56,11 +68,13 @@ function PhotoCarousel({
   rare,
   topInset,
   onBack,
+  onShare,
 }: {
   images: string[];
   rare: boolean;
   topInset: number;
   onBack: () => void;
+  onShare: () => void;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
@@ -81,6 +95,16 @@ function PhotoCarousel({
         hitSlop={12}
       >
         <CaretLeftIcon size={28} color={COLORS.white} weight="bold" />
+      </Pressable>
+      <Pressable
+        style={[styles.photoShareButton, { top: topInset + 10 }]}
+        onPress={onShare}
+        hitSlop={12}
+        accessibilityRole="button"
+        accessibilityLabel="Share listing"
+      >
+        <ShareNetworkIcon size={24} color={COLORS.white} weight="bold" />
+        <Text style={styles.photoShareButtonText}>Share</Text>
       </Pressable>
       <FlatList
         ref={flatListRef}
@@ -140,17 +164,14 @@ export default function ListingDetailScreen() {
   const insets = useSafeAreaInsets();
   const { activeView, member } = useAuth();
   const offerSheetRef = useRef<BottomSheetModal>(null);
+  const shareSheetRef = useRef<BottomSheetModal>(null);
   const offerSnapPoints = useMemo(() => ["58%"], []);
+  const shareSnapPoints = useMemo(() => ["25%"], []);
   const [selectedOffer, setSelectedOffer] = useState<"asking" | "near" | "low" | "custom">("custom");
   const [customOffer, setCustomOffer] = useState("");
   const { data: listing, isPending } = useQuery({
     queryKey: ["listing", id],
     queryFn: () => fetchListingById(id),
-    enabled: Boolean(id),
-  });
-  const { data: topOffer = null } = useQuery({
-    queryKey: ["listing-top-offer", id],
-    queryFn: () => fetchListingTopOffer(id),
     enabled: Boolean(id),
   });
   const { data: myPendingOffer = null } = useQuery({
@@ -174,6 +195,17 @@ export default function ListingDetailScreen() {
         appearsOnIndex={0}
         disappearsOnIndex={-1}
         opacity={0.35}
+      />
+    ),
+    [],
+  );
+  const renderShareBackdrop = useCallback(
+    (props: BottomSheetBackdropProps) => (
+      <BottomSheetBackdrop
+        {...props}
+        appearsOnIndex={0}
+        disappearsOnIndex={-1}
+        opacity={0.52}
       />
     ),
     [],
@@ -205,7 +237,6 @@ export default function ListingDetailScreen() {
   const rideable = listing.condition !== "project";
   const sellerName = listing.sellerName ?? "Seller";
   const sellerId = listing.sellerId ?? listing.id;
-  const topOfferText = topOffer ? formatUsd(topOffer) : "No offers yet";
   const isSellerViewingOwnListing = Boolean(
     activeView === "builder" && member?.id && listing.sellerId === member.id,
   );
@@ -216,6 +247,62 @@ export default function ListingDetailScreen() {
     setCustomOffer("");
     offerSheetRef.current?.present();
   };
+
+  const listingSharePayload = {
+    id: listing.id,
+    year: listing.year,
+    make: listing.make,
+    model: listing.model,
+    price: listing.price,
+    mileage: listing.mileage,
+    city: listing.city,
+    image: images[0],
+  };
+
+  const handleShareListing = () => {
+    hapticSelection();
+    shareSheetRef.current?.present();
+  };
+
+  const safelyShare = async (shareAction: () => Promise<void>) => {
+    shareSheetRef.current?.dismiss();
+    try {
+      await shareAction();
+    } catch (error) {
+      Alert.alert(
+        "Share unavailable",
+        error instanceof Error ? error.message : "Could not share this listing.",
+      );
+    }
+  };
+
+  const messageSeller = async () => {
+    hapticMedium();
+    try {
+      const conversationId = await startConversation({
+        participantId: listing.sellerId,
+        participantName: sellerName,
+        listingId: listing.id,
+      });
+      router.push({
+        pathname: "/messages/[id]",
+        params: {
+          id: conversationId,
+          sellerName,
+          listingTitle: `${listing.year} ${listing.make} ${listing.model}`,
+          sellerCity: listing.city ?? "",
+          sellerMemberSince: listing.sellerMemberSince ?? "",
+          sellerVerified: listing.sellerVerified ? "true" : "",
+        },
+      });
+    } catch (error) {
+      Alert.alert(
+        "Message unavailable",
+        error instanceof Error ? error.message : "Could not open a message with this seller.",
+      );
+    }
+  };
+
   const submitOffer = async () => {
     if (myPendingOffer) {
       offerSheetRef.current?.dismiss();
@@ -303,6 +390,7 @@ export default function ListingDetailScreen() {
           rare={Boolean(listing.isRare)}
           topInset={insets.top}
           onBack={() => backOrReplace(router, "/(tabs)")}
+          onShare={handleShareListing}
         />
 
         <View style={styles.titleBlock}>
@@ -376,28 +464,82 @@ export default function ListingDetailScreen() {
       </ScrollView>
 
       <View style={styles.bottomBar}>
-        <View style={styles.priceSummary}>
-          <View style={styles.listedPriceColumn}>
-            <Text style={styles.priceLabel}>Listed</Text>
-            <Text style={styles.listedPrice}>{formatUsd(listing.price)}</Text>
-            <Text
-              style={[styles.topOfferLine, !topOffer && styles.emptyOfferPrice]}
-              numberOfLines={1}
-            >
-              Top offer: {topOfferText}
-            </Text>
-          </View>
-        </View>
         {isSellerViewingOwnListing ? (
           <Pressable style={styles.ownerButton} onPress={() => router.replace("/(tabs)")}>
             <Text style={styles.ownerButtonText}>Seller dashboard</Text>
           </Pressable>
         ) : (
-          <Pressable style={styles.offerButton} onPress={openOfferSheet}>
-            <Text style={styles.offerButtonText}>Make offer</Text>
-          </Pressable>
+          <View style={styles.listingActions}>
+            <Pressable
+              style={styles.messageButton}
+              onPress={messageSeller}
+              accessibilityRole="button"
+              accessibilityLabel="Message seller about this bike"
+            >
+              <ChatCircleTextIcon size={21} color={COLORS.white} weight="bold" />
+              <Text style={styles.messageButtonText}>Message</Text>
+            </Pressable>
+            <Pressable style={styles.offerButton} onPress={openOfferSheet}>
+              <Text style={styles.offerButtonText}>Make offer</Text>
+              <Text style={styles.offerButtonSubtext}>{formatUsd(listing.price)}</Text>
+            </Pressable>
+          </View>
         )}
       </View>
+
+      <BottomSheetModal
+        ref={shareSheetRef}
+        snapPoints={shareSnapPoints}
+        backdropComponent={renderShareBackdrop}
+        enablePanDownToClose
+        backgroundStyle={styles.shareSheetBg}
+        handleIndicatorStyle={styles.shareSheetHandle}
+      >
+        <BottomSheetView style={styles.shareSheet}>
+          <Text style={styles.shareSheetTitle}>Share this bike</Text>
+          <View style={styles.shareTargets}>
+            <Pressable
+              style={styles.shareTarget}
+              onPress={() => safelyShare(() => messageListing(listingSharePayload))}
+            >
+              <View style={[styles.shareTargetIcon, styles.shareTargetTextIcon]}>
+                <ChatCircleTextIcon size={28} color={COLORS.white} weight="fill" />
+              </View>
+              <Text style={styles.shareTargetLabel}>Text</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.shareTarget}
+              onPress={() => safelyShare(() => shareListingToInstagramOrMore(listingSharePayload))}
+            >
+              <View style={[styles.shareTargetIcon, styles.shareTargetInstagramIcon]}>
+                <InstagramLogoIcon size={28} color={COLORS.white} weight="bold" />
+              </View>
+              <Text style={styles.shareTargetLabel}>Instagram</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.shareTarget}
+              onPress={() => safelyShare(() => shareListingToWhatsApp(listingSharePayload))}
+            >
+              <View style={[styles.shareTargetIcon, styles.shareTargetWhatsAppIcon]}>
+                <Text style={styles.shareTargetWhatsAppGlyph}>W</Text>
+              </View>
+              <Text style={styles.shareTargetLabel}>WhatsApp</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.shareTarget}
+              onPress={() => safelyShare(() => shareListing(listingSharePayload))}
+            >
+              <View style={styles.shareTargetIcon}>
+                <ShareFatIcon size={27} color={COLORS.black} weight="bold" />
+              </View>
+              <Text style={styles.shareTargetLabel}>Share via</Text>
+            </Pressable>
+          </View>
+        </BottomSheetView>
+      </BottomSheetModal>
 
       <BottomSheetModal
         ref={offerSheetRef}
@@ -406,6 +548,9 @@ export default function ListingDetailScreen() {
         enablePanDownToClose
         backgroundStyle={styles.offerSheetBg}
         handleIndicatorStyle={styles.offerSheetHandle}
+        keyboardBehavior="interactive"
+        keyboardBlurBehavior="restore"
+        android_keyboardInputMode="adjustResize"
       >
         <BottomSheetView style={styles.offerSheet}>
           <Text style={styles.offerSheetEyebrow}>Make offer</Text>
@@ -424,7 +569,7 @@ export default function ListingDetailScreen() {
             onPress={() => setSelectedOffer("custom")}
           >
             <Text style={styles.customOfferLabel}>Enter price</Text>
-            <TextInput
+            <BottomSheetTextInput
               value={customOffer}
               onFocus={() => setSelectedOffer("custom")}
               onChangeText={(value) => {
@@ -510,6 +655,26 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.overlay35,
     alignItems: "center",
     justifyContent: "center",
+  },
+  photoShareButton: {
+    position: "absolute",
+    right: SPACING.page,
+    zIndex: 5,
+    minWidth: 82,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.overlay35,
+    flexDirection: "row",
+    gap: 6,
+    paddingHorizontal: 13,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoShareButtonText: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontFamily: F.bold,
+    color: COLORS.white,
   },
   rareBadge: {
     position: "absolute",
@@ -700,59 +865,39 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    minHeight: 108,
+    minHeight: 94,
     borderTopWidth: 1,
     borderTopColor: COLORS.divider,
     backgroundColor: COLORS.white,
+    paddingHorizontal: SPACING.page,
+    paddingTop: 12,
+    paddingBottom: 24,
+    justifyContent: "center",
+  },
+  listingActions: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 16,
-    paddingHorizontal: SPACING.page,
-    paddingTop: 10,
-    paddingBottom: 24,
+    gap: 10,
   },
-  priceSummary: {
-    flex: 1,
-    flexDirection: "row",
-    minWidth: 0,
+  messageButton: {
+    width: MESSAGE_BUTTON_WIDTH,
+    minHeight: 58,
+    borderRadius: 4,
+    backgroundColor: COLORS.black,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 2,
   },
-  listedPriceColumn: {
-    flex: 1,
-    minWidth: 0,
-  },
-  priceLabel: {
-    fontSize: 9,
-    lineHeight: 12,
-    fontFamily: F.monoBold,
-    letterSpacing: 1.2,
-    color: COLORS.textFaint,
-    textTransform: "uppercase",
-    marginBottom: 4,
-  },
-  listedPrice: {
-    fontSize: 24,
-    lineHeight: 28,
+  messageButtonText: {
+    fontSize: 11,
+    lineHeight: 13,
     fontFamily: F.bold,
-    color: COLORS.textPrimary,
-  },
-  topOfferLine: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontFamily: F.bold,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  emptyOfferPrice: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontFamily: F.semibold,
-    color: COLORS.textMuted,
+    color: COLORS.white,
   },
   offerButton: {
     ...S.primaryButton,
-    width: FOOTER_BUTTON_WIDTH,
-    flexShrink: 0,
-    minHeight: 54,
+    flex: 1,
+    minHeight: 58,
     borderRadius: 4,
     paddingHorizontal: 18,
     paddingVertical: 0,
@@ -760,6 +905,14 @@ const styles = StyleSheet.create({
   offerButtonText: {
     ...S.primaryButtonText,
     fontSize: 17,
+    lineHeight: 21,
+  },
+  offerButtonSubtext: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontFamily: F.bold,
+    color: COLORS.whiteA70,
+    marginTop: 1,
   },
   ownerButton: {
     ...S.primaryButton,
@@ -773,6 +926,75 @@ const styles = StyleSheet.create({
   ownerButtonText: {
     ...S.primaryButtonText,
     fontSize: 15,
+  },
+  shareSheetBg: {
+    backgroundColor: COLORS.white,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+  },
+  shareSheetHandle: {
+    alignSelf: "center",
+    width: 42,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: COLORS.gray300,
+    marginBottom: 10,
+  },
+  shareSheet: {
+    paddingHorizontal: SPACING.page,
+    paddingBottom: 36,
+  },
+  shareSheetTitle: {
+    fontSize: 22,
+    lineHeight: 27,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    marginBottom: SPACING.lg,
+  },
+  shareTargets: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: 22,
+  },
+  shareTarget: {
+    width: 68,
+    alignItems: "center",
+  },
+  shareTargetIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: COLORS.gray100,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  shareTargetTextIcon: {
+    backgroundColor: COLORS.accentAlt,
+    borderColor: COLORS.accentAlt,
+  },
+  shareTargetInstagramIcon: {
+    backgroundColor: COLORS.accent,
+    borderColor: COLORS.accent,
+  },
+  shareTargetWhatsAppIcon: {
+    backgroundColor: "#25D366",
+    borderColor: "#25D366",
+  },
+  shareTargetWhatsAppGlyph: {
+    fontSize: 24,
+    lineHeight: 28,
+    fontFamily: F.bold,
+    color: COLORS.white,
+  },
+  shareTargetLabel: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+    textAlign: "center",
+    marginTop: 8,
   },
   offerSheetBg: {
     backgroundColor: COLORS.white,
