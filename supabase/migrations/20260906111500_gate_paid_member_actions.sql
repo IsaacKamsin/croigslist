@@ -55,7 +55,7 @@ on public.listings for select
 to authenticated
 using (
   public.is_approved_member(auth.uid())
-  and status in ('active', 'sold')
+  and status in ('active', 'pending', 'sold')
   and (seller_id is not null or shop_id is not null)
 );
 

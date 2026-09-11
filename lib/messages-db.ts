@@ -1,4 +1,11 @@
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
+import {
+  contentTypeForUri,
+  extensionForContentType,
+  imageUploadBody,
+  type LocalImageData,
+} from "@/lib/image-upload";
+import { getMessageModerationError } from "@/lib/message-moderation";
 import { notifyNewMessage } from "@/lib/notification-events";
 
 export type MessageThread = {
@@ -21,6 +28,7 @@ export type MessageThread = {
 export type ConversationMessage = {
   id: string;
   text: string;
+  imageUrl?: string;
   fromMe: boolean;
   time: string;
   createdAt: string;
@@ -90,6 +98,8 @@ type ProfileNameRow = {
 type MessageRow = {
   id: string;
   body: string;
+  image_url?: string | null;
+  image_path?: string | null;
   sender_id: string | null;
   created_at: string;
 };
@@ -136,6 +146,9 @@ const THREAD_COLUMNS =
 
 const THREAD_COLUMNS_LEGACY =
   "id, owner_id, participant_name, participant_id, last_message, last_message_at, unread";
+const MESSAGE_IMAGE_BUCKET = "listing-images";
+const MESSAGE_IMAGE_BODY_PREFIX = "[croig-image]";
+const MESSAGE_IMAGE_TTL_SECONDS = 60 * 60;
 
 const THREAD_SELECTS = [
   `${THREAD_COLUMNS}, listing:listings(id, seller_id, seller_name, year, make, model)`,
@@ -211,6 +224,71 @@ function profileAvatarUrl(profile?: ProfileNameRow) {
   // Rows written before uploads were guarded can hold a device-local file:// path,
   // which is meaningless on anyone else's device.
   return candidates.find((url) => url?.startsWith("http")) ?? "";
+}
+
+function encodeImageMessageBody(imageUrl: string | null, text: string) {
+  if (!imageUrl) return text || "Photo";
+  return `${MESSAGE_IMAGE_BODY_PREFIX}${imageUrl}${text ? `\n${text}` : ""}`;
+}
+
+function parseImageMessageBody(body: string, imageUrl?: string | null) {
+  if (!body.startsWith(MESSAGE_IMAGE_BODY_PREFIX)) {
+    return { text: body, imageUrl: imageUrl ?? undefined };
+  }
+
+  const withoutPrefix = body.slice(MESSAGE_IMAGE_BODY_PREFIX.length);
+  const [encodedUrl = "", ...captionParts] = withoutPrefix.split("\n");
+  const caption = captionParts.join("\n").trim();
+
+  return {
+    text: caption || "Photo",
+    imageUrl: imageUrl ?? (encodedUrl.trim() || undefined),
+  };
+}
+
+async function signedMessageImageUrls(rows: MessageRow[]) {
+  const imagePaths = rows
+    .map((row) => row.image_path)
+    .filter((path): path is string => Boolean(path));
+  const signedUrls = new Map<string, string>();
+  if (imagePaths.length === 0) return signedUrls;
+
+  const { data } = await supabase.storage
+    .from(MESSAGE_IMAGE_BUCKET)
+    .createSignedUrls(imagePaths, MESSAGE_IMAGE_TTL_SECONDS);
+
+  for (const item of data ?? []) {
+    if (item.path && item.signedUrl) signedUrls.set(item.path, item.signedUrl);
+  }
+
+  return signedUrls;
+}
+
+async function uploadMessageImage(
+  userId: string,
+  conversationId: string,
+  uri?: string,
+  imageData?: LocalImageData,
+) {
+  if (!uri) return { imageUrl: null, imagePath: null };
+
+  const contentType = imageData?.mimeType ?? contentTypeForUri(uri);
+  const extension = extensionForContentType(contentType);
+  const imagePath = `${userId}/${conversationId}/${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}.${extension}`;
+
+  const { error } = await supabase.storage
+    .from(MESSAGE_IMAGE_BUCKET)
+    .upload(imagePath, await imageUploadBody(uri, imageData), {
+      contentType,
+      upsert: false,
+    });
+
+  if (error) throw error;
+
+  const { data } = supabase.storage.from(MESSAGE_IMAGE_BUCKET).getPublicUrl(imagePath);
+  return { imageUrl: data.publicUrl, imagePath };
 }
 
 function otherParticipantId(row: ThreadRow, currentUserId?: string) {
@@ -590,22 +668,50 @@ export async function fetchConversationMessages(
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { data, error } = await supabase
+  let data: MessageRow[] | null = null;
+  let error: unknown = null;
+  const withImages = await supabase
     .from("conversation_messages")
-    .select("id, body, sender_id, created_at")
+    .select("id, body, image_url, image_path, sender_id, created_at")
     .eq("conversation_id", conversationId)
     .order("created_at", { ascending: true });
+
+  if (withImages.error && isDegradableListingEmbed(withImages.error)) {
+    const legacy = await supabase
+      .from("conversation_messages")
+      .select("id, body, sender_id, created_at")
+      .eq("conversation_id", conversationId)
+      .order("created_at", { ascending: true });
+    data = (legacy.data ?? []) as MessageRow[];
+    error = legacy.error;
+  } else {
+    data = (withImages.data ?? []) as MessageRow[];
+    error = withImages.error;
+  }
 
   if (error) {
     if (isMissingMessagesSchema(error)) return [];
     throw error;
   }
+  const imageUrls = await signedMessageImageUrls(data ?? []);
   return ((data ?? []) as MessageRow[]).map((row) => ({
-    id: row.id,
-    text: row.body,
-    fromMe: Boolean(user?.id && row.sender_id === user.id),
-    time: shortTime(row.created_at),
-    createdAt: row.created_at,
+    ...(() => {
+      const parsed = parseImageMessageBody(
+        row.body,
+        row.image_path
+          ? imageUrls.get(row.image_path) ?? row.image_url
+          : row.image_url,
+      );
+
+      return {
+        id: row.id,
+        text: parsed.text,
+        imageUrl: parsed.imageUrl,
+        fromMe: Boolean(user?.id && row.sender_id === user.id),
+        time: shortTime(row.created_at),
+        createdAt: row.created_at,
+      };
+    })(),
   }));
 }
 
@@ -824,9 +930,18 @@ async function setConversationArchived(conversationId: string, archived: boolean
 export async function sendConversationMessage(
   conversationId: string,
   body: string,
-  options: { notify?: boolean } = {},
+  options: {
+    notify?: boolean;
+    moderate?: boolean;
+    imageUri?: string;
+    imageData?: LocalImageData;
+  } = {},
 ) {
   if (!isSupabaseConfigured) return;
+  const cleanBody = body.trim();
+  const shouldModerate = options.moderate !== false;
+  const moderationError = shouldModerate ? getMessageModerationError(cleanBody) : null;
+  if (moderationError) throw new Error(moderationError);
 
   const {
     data: { user },
@@ -836,6 +951,15 @@ export async function sendConversationMessage(
   if (userError) throw userError;
   if (!user) throw new Error("Sign in required.");
   const shouldNotify = options.notify !== false;
+  const { imageUrl, imagePath } = await uploadMessageImage(
+    user.id,
+    conversationId,
+    options.imageUri,
+    options.imageData,
+  );
+  const messageBody = cleanBody || (imagePath ? "Photo" : "");
+  if (!messageBody) return;
+  const fallbackBody = encodeImageMessageBody(imageUrl, cleanBody);
 
   const { data: conversation } = shouldNotify
     ? await supabase
@@ -845,11 +969,27 @@ export async function sendConversationMessage(
         .maybeSingle<ConversationNotificationRow>()
     : { data: null };
 
-  const { error } = await supabase.from("conversation_messages").insert({
+  const insertPayload = {
     conversation_id: conversationId,
     sender_id: user.id,
-    body,
-  });
+    body: messageBody,
+    image_url: imageUrl,
+    image_path: imagePath,
+  };
+  const { error: insertError } = await supabase
+    .from("conversation_messages")
+    .insert(insertPayload);
+
+  const error =
+    insertError && isDegradableListingEmbed(insertError) && imageUrl
+      ? (
+          await supabase.from("conversation_messages").insert({
+            conversation_id: conversationId,
+            sender_id: user.id,
+            body: fallbackBody,
+          })
+        ).error
+      : insertError;
 
   if (error) {
     if (isMissingMessagesSchema(error)) {
@@ -868,7 +1008,7 @@ export async function sendConversationMessage(
   const { error: updateError } = await supabase
     .from("conversations")
     .update({
-      last_message: body,
+      last_message: messageBody,
       last_message_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
       unread: true,
@@ -896,7 +1036,7 @@ export async function sendConversationMessage(
         recipientUserId,
         senderName: user.user_metadata?.name || user.email?.split("@")[0],
         listingTitle,
-        body,
+        body: imagePath ? "Photo" : messageBody,
       }).catch(() => undefined);
     }
   }

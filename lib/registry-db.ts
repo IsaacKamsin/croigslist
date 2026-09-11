@@ -20,7 +20,7 @@ export type RegistryListing = {
   mileage?: string;
   description?: string;
   condition?: string;
-  status?: "active" | "sold" | "draft";
+  status?: ListingStatus;
   isRare?: boolean;
   isProject?: boolean;
   sellerId?: string;
@@ -93,7 +93,7 @@ export type RegistryData = {
   sold: SoldListing[];
 };
 
-type ListingStatus = "active" | "sold" | "draft";
+export type ListingStatus = "active" | "pending" | "sold" | "draft";
 
 type ListingRow = {
   id: string;
@@ -218,11 +218,11 @@ async function notifyNewListing(listingId: string) {
   }
 }
 
-function activeListingCounts(rows: ListingRow[], ownerKey: "seller_id" | "shop_id") {
+function listingCounts(rows: ListingRow[], ownerKey: "seller_id" | "shop_id") {
   const counts = new Map<string, number>();
   for (const row of rows) {
     const ownerId = row[ownerKey];
-    if (!ownerId || row.status !== "active") continue;
+    if (!ownerId) continue;
     counts.set(ownerId, (counts.get(ownerId) ?? 0) + 1);
   }
   return counts;
@@ -233,7 +233,7 @@ function sellerNameFromProfile(profile: ProfileBuilderRow | null) {
 }
 
 function sellerImageFromProfile(profile: ProfileBuilderRow | null) {
-  return profile?.garage_image_url || profile?.avatar_url || undefined;
+  return profile?.avatar_url || profile?.garage_image_url || undefined;
 }
 
 function shopFromRow(row: ShopRow, buildsCount = row.builds_count ?? 0): RegistryShop {
@@ -270,7 +270,7 @@ function builderFromProfile(
     name,
     specialty: row.bio || "Private seller",
     builds: buildsCount,
-    image: row.garage_image_url || row.avatar_url || "",
+    image: row.avatar_url || row.garage_image_url || "",
     tagline: row.city ? `${row.city} seller` : "Seller profile",
     verified: Boolean(row.is_verified),
     badges: row.role === "builder" ? ["builder"] : ["seller"],
@@ -406,15 +406,14 @@ export async function fetchRegistryData(): Promise<RegistryData> {
   const under5kRows = activeRows.filter((row) => (row.price ?? 0) < 5000);
   const rareRows = activeRows.filter((row) => row.is_rare);
   const projectRows = activeRows.filter((row) => row.is_project);
-  const profileListingCounts = activeListingCounts(activeRows, "seller_id");
-  const shopListingCounts = activeListingCounts(activeRows, "shop_id");
+  const profileListingCounts = listingCounts(listingRows, "seller_id");
+  const shopListingCounts = listingCounts(listingRows, "shop_id");
   const shops = [
     ...profileRows
       .map((profile) => ({
         profile,
         listingCount: profileListingCounts.get(profile.id) ?? 0,
       }))
-      .filter(({ listingCount }) => listingCount > 0)
       .map(({ profile, listingCount }) => builderFromProfile(profile, listingCount)),
     ...shopRows
       .map((shop) => ({
@@ -466,7 +465,7 @@ export async function fetchListings(): Promise<RegistryListing[]> {
   const { data, error } = await supabase
     .from("listings")
     .select(LISTING_SELECT)
-    .in("status", ["active", "sold"])
+    .in("status", ["active", "pending", "sold"])
     .order("created_at", { ascending: false })
     .limit(100);
 
@@ -488,12 +487,40 @@ export async function fetchMyListings(): Promise<RegistryListing[]> {
     .from("listings")
     .select(LISTING_SELECT)
     .eq("seller_id", user.id)
-    .in("status", ["active", "sold", "draft"])
+    .in("status", ["active", "pending", "sold", "draft"])
     .order("created_at", { ascending: false })
     .limit(100);
 
   if (error) return [];
   return ((data ?? []) as ListingRow[]).map(listingFromRow);
+}
+
+export async function updateListingStatus(
+  listingId: string,
+  status: Extract<ListingStatus, "active" | "pending" | "draft">,
+) {
+  if (!isSupabaseConfigured) return;
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) throw userError;
+  if (!user) throw new Error("Sign in required.");
+
+  const { data, error } = await supabase
+    .from("listings")
+    .update({ status, updated_at: new Date().toISOString() })
+    .eq("id", listingId)
+    .eq("seller_id", user.id)
+    .select("id")
+    .limit(1);
+
+  if (error) throw error;
+  if (!data?.length) {
+    throw new Error("Could not update this listing. Refresh and try again.");
+  }
 }
 
 export async function createListing(input: CreateListingInput): Promise<RegistryListing> {
@@ -634,18 +661,18 @@ export async function fetchShops(): Promise<RegistryShop[]> {
     supabase
       .from("listings")
       .select(LISTING_SELECT)
-      .eq("status", "active")
+      .in("status", ["active", "pending", "sold"])
       .limit(200),
   ]);
 
   if (shopsResult.error) return [];
 
-  const listingCounts = activeListingCounts(
+  const listingCountsByShop = listingCounts(
     ((listingsResult.data ?? []) as ListingRow[]).filter(hasRealListingOwner),
     "shop_id",
   );
   return ((shopsResult.data ?? []) as ShopRow[])
-    .map((shop) => ({ shop, listingCount: listingCounts.get(shop.id) ?? 0 }))
+    .map((shop) => ({ shop, listingCount: listingCountsByShop.get(shop.id) ?? 0 }))
     .filter(({ listingCount }) => listingCount > 0)
     .map(({ shop, listingCount }) => shopFromRow(shop, listingCount));
 }
@@ -668,22 +695,21 @@ export async function fetchBuilders(): Promise<RegistryShop[]> {
     supabase
       .from("listings")
       .select(LISTING_SELECT)
-      .eq("status", "active")
+      .in("status", ["active", "pending", "sold"])
       .limit(200),
   ]);
 
-  const activeRows = ((listingsResult.data ?? []) as ListingRow[]).filter(
+  const visibleRows = ((listingsResult.data ?? []) as ListingRow[]).filter(
     hasRealListingOwner,
   );
-  const profileListingCounts = activeListingCounts(activeRows, "seller_id");
-  const shopListingCounts = activeListingCounts(activeRows, "shop_id");
+  const profileListingCounts = listingCounts(visibleRows, "seller_id");
+  const shopListingCounts = listingCounts(visibleRows, "shop_id");
   const profiles = ((profilesResult.data ?? []) as ProfileBuilderRow[])
     .filter(isDirectoryBuilderProfile)
     .map((profile) => ({
       profile,
       listingCount: profileListingCounts.get(profile.id) ?? 0,
     }))
-    .filter(({ listingCount }) => listingCount > 0)
     .map(({ profile, listingCount }) => builderFromProfile(profile, listingCount));
   const shops = ((shopsResult.data ?? []) as ShopRow[])
     .map((shop) => ({ shop, listingCount: shopListingCounts.get(shop.id) ?? 0 }))
@@ -712,7 +738,7 @@ export async function fetchShopBySlug(slug: string): Promise<RegistryShop | null
     .from("listings")
     .select(LISTING_SELECT)
     .eq("shop_id", data.id)
-    .in("status", ["active", "sold"])
+    .in("status", ["active", "pending", "sold"])
     .order("created_at", { ascending: false })
     .limit(20);
 
@@ -735,7 +761,7 @@ export async function fetchBuilderProfile(id: string) {
     .from("listings")
     .select(LISTING_SELECT)
     .eq("seller_id", id)
-    .in("status", ["active", "sold"])
+    .in("status", ["active", "pending", "sold"])
     .order("created_at", { ascending: false })
     .limit(20);
 
@@ -756,6 +782,7 @@ export async function fetchBuilderProfile(id: string) {
   return {
     id: profile.id,
     name: profile.garage_name || profile.full_name || profile.handle || "Seller",
+    image: sellerImageFromProfile(profile),
     type: profile.role || "seller",
     city: profile.city || "",
     verified: Boolean(profile.is_verified),

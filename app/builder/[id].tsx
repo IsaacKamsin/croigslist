@@ -25,6 +25,7 @@ const CARD_WIDTH = (width - SPACING.page * 2 - GRID_GAP) / 2;
 type SellerProfile = {
   id: string;
   name: string;
+  image?: string;
   type: string;
   city: string;
   verified: boolean;
@@ -80,7 +81,9 @@ export default function BuilderProfileScreen() {
       },
     });
   };
-  const activeListings = builder.listings.filter((item) => item.status !== "sold");
+  const activeListings = builder.listings.filter((item) => item.status === "active");
+  const pendingListings = builder.listings.filter((item) => item.status === "pending");
+  const visibleListings = [...activeListings, ...pendingListings];
   const soldListings = builder.listings.filter((item) => item.status === "sold");
 
   return (
@@ -98,7 +101,16 @@ export default function BuilderProfileScreen() {
       <View style={styles.profileBlock}>
         <View style={styles.profileTop}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{builder.name[0]}</Text>
+            {builder.image ? (
+              <Image
+                source={{ uri: builder.image }}
+                style={styles.avatarImage}
+                contentFit="cover"
+                cachePolicy={IMAGE_CACHE}
+              />
+            ) : (
+              <Text style={styles.avatarText}>{builder.name[0]}</Text>
+            )}
           </View>
           <View style={styles.profileInfo}>
             <Text style={styles.name}>{builder.name}</Text>
@@ -109,20 +121,12 @@ export default function BuilderProfileScreen() {
               <Text style={styles.memberLine}>Member since: {builder.memberSince}</Text>
             ) : null}
             <Text style={styles.activityLine}>
-              {activeListings.length} active · {soldListings.length} sold
+              {activeListings.length} active · {pendingListings.length} pending · {soldListings.length} sold
             </Text>
           </View>
         </View>
 
         <View style={styles.statsActionRow}>
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>{activeListings.length}</Text>
-            <Text style={styles.statLabel}>Active</Text>
-          </View>
-          <View style={styles.stat}>
-            <Text style={styles.statValue}>{soldListings.length}</Text>
-            <Text style={styles.statLabel}>Sold</Text>
-          </View>
           <Pressable style={styles.contactButton} onPress={handleMessage}>
             <Text style={styles.contactButtonText}>Message seller</Text>
           </Pressable>
@@ -143,7 +147,7 @@ export default function BuilderProfileScreen() {
       </View>
 
       <View style={styles.grid}>
-        {activeListings.length === 0 ? (
+        {visibleListings.length === 0 ? (
           <View style={styles.emptyListings}>
             <Text style={styles.emptyListingsTitle}>No listings yet</Text>
             <Text style={styles.emptyListingsBody}>
@@ -154,7 +158,7 @@ export default function BuilderProfileScreen() {
             </Pressable>
           </View>
         ) : (
-          activeListings.map((item) => (
+          visibleListings.map((item) => (
             <BuilderGridItem
               key={item.id}
               item={item}
@@ -251,6 +255,11 @@ const styles = StyleSheet.create({
     width: 96,
     height: 96,
     borderRadius: 48,
+    overflow: "hidden",
+  },
+  avatarImage: {
+    width: "100%",
+    height: "100%",
   },
   avatarText: {
     ...S.avatarText,
@@ -288,6 +297,7 @@ const styles = StyleSheet.create({
   },
   statsActionRow: {
     flexDirection: "row",
+    flexWrap: "wrap",
     alignItems: "center",
     gap: 18,
     marginTop: 20,
@@ -309,6 +319,7 @@ const styles = StyleSheet.create({
   },
   contactButton: {
     flex: 1,
+    minWidth: 180,
     minHeight: 44,
     paddingHorizontal: 18,
     backgroundColor: COLORS.black,

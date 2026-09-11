@@ -240,8 +240,18 @@ export default function ListingDetailScreen() {
   const isSellerViewingOwnListing = Boolean(
     activeView === "builder" && member?.id && listing.sellerId === member.id,
   );
+  const canMakeOffer = listing.status === "active";
 
   const openOfferSheet = () => {
+    if (!canMakeOffer) {
+      Alert.alert(
+        listing.status === "sold" ? "Bike sold" : "Offer unavailable",
+        listing.status === "sold"
+          ? "This bike has already sold. You can still message the seller."
+          : "This bike has a pending meet-up. You can still message the seller.",
+      );
+      return;
+    }
     hapticMedium();
     setSelectedOffer("custom");
     setCustomOffer("");
@@ -304,6 +314,16 @@ export default function ListingDetailScreen() {
   };
 
   const submitOffer = async () => {
+    if (!canMakeOffer) {
+      Alert.alert(
+        listing.status === "sold" ? "Bike sold" : "Offer unavailable",
+        listing.status === "sold"
+          ? "This bike has already sold. You can still message the seller."
+          : "This bike has a pending meet-up. You can still message the seller.",
+      );
+      return;
+    }
+
     if (myPendingOffer) {
       offerSheetRef.current?.dismiss();
       router.push({
@@ -414,6 +434,11 @@ export default function ListingDetailScreen() {
             <View style={styles.infoPill}>
               <Text style={styles.infoPillText}>{rideable ? "Rideable" : "Project"}</Text>
             </View>
+            {listing.status === "pending" ? (
+              <View style={[styles.infoPill, styles.pendingPill]}>
+                <Text style={[styles.infoPillText, styles.pendingPillText]}>Meet pending</Text>
+              </View>
+            ) : null}
             {listing.isRare ? (
               <View style={styles.infoPill}>
                 <Text style={styles.infoPillText}>Rare find</Text>
@@ -479,10 +504,21 @@ export default function ListingDetailScreen() {
               <ChatCircleTextIcon size={21} color={COLORS.white} weight="bold" />
               <Text style={styles.messageButtonText}>Message</Text>
             </Pressable>
-            <Pressable style={styles.offerButton} onPress={openOfferSheet}>
-              <Text style={styles.offerButtonText}>Make offer</Text>
-              <Text style={styles.offerButtonSubtext}>{formatUsd(listing.price)}</Text>
-            </Pressable>
+            {canMakeOffer ? (
+              <Pressable style={styles.offerButton} onPress={openOfferSheet}>
+                <Text style={styles.offerButtonText}>Make offer</Text>
+                <Text style={styles.offerButtonSubtext}>{formatUsd(listing.price)}</Text>
+              </Pressable>
+            ) : (
+              <View style={[styles.offerButton, styles.offerButtonUnavailable]}>
+                <Text style={[styles.offerButtonText, styles.offerButtonUnavailableText]}>
+                  {listing.status === "sold" ? "Sold" : "Meet pending"}
+                </Text>
+                <Text style={[styles.offerButtonSubtext, styles.offerButtonUnavailableText]}>
+                  Message seller
+                </Text>
+              </View>
+            )}
           </View>
         )}
       </View>
@@ -794,6 +830,12 @@ const styles = StyleSheet.create({
     fontFamily: F.bold,
     color: COLORS.textPrimary,
   },
+  pendingPill: {
+    borderColor: COLORS.accent,
+  },
+  pendingPillText: {
+    color: COLORS.accent,
+  },
 
   // Sections
   divider: S.dividerInset,
@@ -902,6 +944,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 0,
   },
+  offerButtonUnavailable: {
+    backgroundColor: COLORS.surfaceRaised,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
   offerButtonText: {
     ...S.primaryButtonText,
     fontSize: 17,
@@ -913,6 +960,9 @@ const styles = StyleSheet.create({
     fontFamily: F.bold,
     color: COLORS.whiteA70,
     marginTop: 1,
+  },
+  offerButtonUnavailableText: {
+    color: COLORS.textMuted,
   },
   ownerButton: {
     ...S.primaryButton,

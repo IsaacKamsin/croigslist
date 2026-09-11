@@ -98,7 +98,7 @@ function isOfferMessage(body: string) {
 }
 
 function closedOfferFromMessage(body: string) {
-  const match = body.match(/^(Accepted|Declined|Cancelled) offer:\s*\$([\d,]+)\.?\s*(.*)$/i);
+  const match = body.match(/^(Accepted|Declined|Cancelled)\s+(?:offer|sale):\s*\$([\d,]+)\.?\s*(.*)$/i);
   if (!match) return null;
   const status = match[1].toLowerCase();
   return {
@@ -635,18 +635,25 @@ async function addBuyerNames(offers: ListingOffer[]) {
 // Offers reconstructed from the transcript carry placeholder listing ids
 // ("message-offer-listing", "local-listing"). Sending those to a uuid column
 // throws 22P02 instead of accepting the offer.
-async function markListingSold(offer: ListingOffer, status: "accepted" | "declined") {
-  if (status !== "accepted") return;
+async function updateListingSaleStatus(
+  offer: ListingOffer,
+  status: "active" | "sold",
+) {
   if (!offer.sellerId || !isUuid(offer.sellerId)) return;
   if (!offer.listingId || !isUuid(offer.listingId)) return;
 
   const { error } = await supabase
     .from("listings")
-    .update({ status: "sold", updated_at: new Date().toISOString() })
+    .update({ status, updated_at: new Date().toISOString() })
     .eq("id", offer.listingId)
     .eq("seller_id", offer.sellerId);
 
   if (error) throw error;
+}
+
+async function markListingSold(offer: ListingOffer, status: "accepted" | "declined") {
+  if (status !== "accepted") return;
+  await updateListingSaleStatus(offer, "sold");
 
   await notifySoldListing({
     userId: offer.sellerId,
@@ -667,7 +674,10 @@ export async function respondToListingOffer({
   if (!isSupabaseConfigured) return;
 
   if (offer.id.startsWith("message-offer-")) {
-    await sendConversationMessage(offer.conversationId, message, { notify: false });
+    await sendConversationMessage(offer.conversationId, message, {
+      notify: false,
+      moderate: false,
+    });
     await markListingSold(offer, status);
     return;
   }
@@ -689,7 +699,10 @@ export async function respondToListingOffer({
     throw new Error("Could not update this offer. It may have already been answered.");
   }
 
-  await sendConversationMessage(offer.conversationId, message, { notify: false });
+  await sendConversationMessage(offer.conversationId, message, {
+    notify: false,
+    moderate: false,
+  });
 
   if (status === "accepted") {
     await notifyOfferAccepted({
@@ -724,7 +737,7 @@ export async function cancelListingOffer({
   if (!isSupabaseConfigured) return;
 
   if (offer.id.startsWith("message-offer-")) {
-    await sendConversationMessage(offer.conversationId, message);
+    await sendConversationMessage(offer.conversationId, message, { moderate: false });
     return;
   }
 
@@ -743,5 +756,53 @@ export async function cancelListingOffer({
     throw new Error("Could not cancel this offer. Refresh and try again.");
   }
 
-  await sendConversationMessage(offer.conversationId, message);
+  await sendConversationMessage(offer.conversationId, message, { moderate: false });
+}
+
+export async function cancelAcceptedListingOffer({
+  offer,
+  message,
+}: {
+  offer: ListingOffer;
+  message: string;
+}) {
+  if (!isSupabaseConfigured) return;
+  if (offer.status !== "accepted") {
+    throw new Error("Only accepted offers can cancel the sale.");
+  }
+
+  if (offer.id.startsWith("message-offer-")) {
+    await sendConversationMessage(offer.conversationId, message, { moderate: false });
+    await updateListingSaleStatus(offer, "active");
+    return;
+  }
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) throw userError;
+  if (!user) throw new Error("Sign in required.");
+  if (user.id !== offer.buyerId && user.id !== offer.sellerId) {
+    throw new Error("Only the buyer or seller can cancel this sale.");
+  }
+
+  const { data: updated, error } = await supabase
+    .from("listing_offers")
+    .update({ status: "cancelled", updated_at: new Date().toISOString() })
+    .eq("id", offer.id)
+    .in("status", ["accepted"])
+    .select("id");
+
+  if (error) {
+    if (isMissingOffersSchema(error)) return;
+    throw error;
+  }
+  if (!updated?.length) {
+    throw new Error("Could not cancel this sale. Refresh and try again.");
+  }
+
+  await updateListingSaleStatus(offer, "active");
+  await sendConversationMessage(offer.conversationId, message, { moderate: false });
 }

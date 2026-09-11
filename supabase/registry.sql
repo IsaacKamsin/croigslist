@@ -46,7 +46,7 @@ create table if not exists public.listings (
   image_url text,
   image_urls text[] not null default '{}',
   viewer_count integer not null default 0,
-  status text not null default 'active' check (status in ('active', 'sold', 'draft')),
+  status text not null default 'active' check (status in ('active', 'pending', 'sold', 'draft')),
   is_featured boolean not null default false,
   is_rare boolean not null default false,
   is_project boolean not null default false,
@@ -87,7 +87,7 @@ to authenticated
 using (
   public.is_approved_member(auth.uid())
   and
-  status in ('active', 'sold')
+  status in ('active', 'pending', 'sold')
   and (seller_id is not null or shop_id is not null)
 );
 

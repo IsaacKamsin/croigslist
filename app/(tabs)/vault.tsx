@@ -95,7 +95,7 @@ async function findListingMatches(brand?: string, model?: string) {
 
   const listings = await fetchListings();
   return listings
-    .filter((listing) => listing.status !== "sold")
+    .filter((listing) => listing.status === "active")
     .map((listing) => {
       const makeMatch = b && listing.make.toLowerCase().includes(b);
       const modelMatch =

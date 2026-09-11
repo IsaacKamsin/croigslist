@@ -3,7 +3,7 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { hapticLight, hapticWarning } from '@/hooks/useHaptics';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { COLORS, F, SPACING, TYPE } from '@/constants/design';
 import { S } from '@/constants/styles';
 import { Image } from 'expo-image';
@@ -14,7 +14,7 @@ import { fetchMessageThreads } from '@/lib/messages-db';
 import { useQuery } from '@tanstack/react-query';
 import { shareBuyerInvite, shareSellerInvite } from '@/lib/share';
 import { cancelAnnualMembership, syncAnnualMembership } from '@/lib/payments';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 function formatSubscriptionDate(value?: string) {
   if (!value) return '';
@@ -95,7 +95,7 @@ export default function ProfileScreen() {
     : hasActiveSubscription
       ? '$100/year · Active membership'
       : '$100/year · Complete payment to activate';
-  const { data: stats } = useQuery({
+  const { data: stats, refetch: refetchStats } = useQuery({
     queryKey: ['profile-stats', member?.id],
     queryFn: async () => {
       const [garageBikes, listings, threads] = await Promise.all([
@@ -117,6 +117,12 @@ export default function ProfileScreen() {
       messageCount: 0,
     },
   });
+
+  useFocusEffect(
+    useCallback(() => {
+      refetchStats();
+    }, [refetchStats]),
+  );
 
   useEffect(() => {
     if (!hasActiveSubscription || renewalDate || !member?.subscriptionId) return;

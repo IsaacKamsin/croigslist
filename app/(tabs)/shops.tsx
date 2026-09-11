@@ -10,23 +10,27 @@ import { fetchGarageDetails } from "@/lib/garage-profile-db";
 import {
   fetchBuilders,
   fetchMyListings,
+  updateListingStatus,
   type RegistryListing,
   type RegistryShop,
 } from "@/lib/registry-db";
 import { Image } from "expo-image";
 import { useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useRef } from "react";
-import { FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Alert, FlatList, Pressable, RefreshControl, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 function ListingCard({
   listing,
   onPress,
+  onTogglePending,
 }: {
   listing: RegistryListing;
   onPress: () => void;
+  onTogglePending?: () => void;
 }) {
+  const canTogglePending = listing.status === "active" || listing.status === "pending";
   return (
     <Pressable style={styles.listingCard} onPress={onPress}>
       {listing.image ? (
@@ -48,8 +52,35 @@ function ListingCard({
           <Text style={styles.listingName}>{listing.model}</Text>
           <Text style={styles.listingPrice}>{formatUsd(listing.price)}</Text>
         </View>
-        <View style={styles.statusPill}>
-          <Text style={styles.statusText}>{listing.status ?? "active"}</Text>
+        <View style={styles.listingSide}>
+          <View
+            style={[
+              styles.statusPill,
+              listing.status === "pending" && styles.statusPillPending,
+            ]}
+          >
+            <Text
+              style={[
+                styles.statusText,
+                listing.status === "pending" && styles.statusTextPending,
+              ]}
+            >
+              {listing.status ?? "active"}
+            </Text>
+          </View>
+          {canTogglePending ? (
+            <Pressable
+              style={styles.pendingButton}
+              onPress={(event) => {
+                event.stopPropagation();
+                onTogglePending?.();
+              }}
+            >
+              <Text style={styles.pendingButtonText}>
+                {listing.status === "pending" ? "Back active" : "Mark pending"}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </Pressable>
@@ -61,6 +92,7 @@ type ShopScreenRow =
 
 export default function ShopsScreen() {
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { activeView, member, memberStatus, setActiveView } = useAuth();
   const isBuilder = activeView === "builder";
   const listBikeSheetRef = useRef<ListBikeSheetRef>(null);
@@ -99,6 +131,27 @@ export default function ShopsScreen() {
     setActiveView("builder");
     router.replace("/(tabs)");
   }, [router, setActiveView]);
+  const toggleListingPending = useCallback(
+    async (listing: RegistryListing) => {
+      const nextStatus = listing.status === "pending" ? "active" : "pending";
+      try {
+        await updateListingStatus(listing.id, nextStatus);
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ["shops-tab"] }),
+          queryClient.invalidateQueries({ queryKey: ["home"] }),
+          queryClient.invalidateQueries({ queryKey: ["search-listings"] }),
+          queryClient.invalidateQueries({ queryKey: ["listing", listing.id] }),
+          queryClient.invalidateQueries({ queryKey: ["profile-stats"] }),
+        ]);
+      } catch (error) {
+        Alert.alert(
+          "Could not update listing",
+          error instanceof Error ? error.message : "Try again in a moment.",
+        );
+      }
+    },
+    [queryClient],
+  );
   const rows: ShopScreenRow[] = isBuilder
     ? listings.map((listing) => ({
         kind: "listing" as const,
@@ -222,6 +275,7 @@ export default function ShopsScreen() {
           <ListingCard
             listing={item.listing}
             onPress={() => router.push(`/listing/${item.id}`)}
+            onTogglePending={() => toggleListingPending(item.listing)}
           />
         )}
       />
@@ -358,6 +412,11 @@ const styles = StyleSheet.create({
     gap: SPACING.md,
     padding: SPACING.md,
   },
+  listingSide: {
+    alignItems: "flex-end",
+    gap: 8,
+    maxWidth: 118,
+  },
   listingMeta: {
     fontSize: 14,
     fontFamily: F.bold,
@@ -385,11 +444,34 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
     alignSelf: "flex-start",
   },
+  statusPillPending: {
+    borderColor: COLORS.accent,
+    backgroundColor: COLORS.surfaceRaised,
+  },
   statusText: {
     fontSize: 12,
     fontFamily: F.bold,
     letterSpacing: 0,
     color: COLORS.textMuted,
     textTransform: "uppercase",
+  },
+  statusTextPending: {
+    color: COLORS.accent,
+  },
+  pendingButton: {
+    minHeight: 32,
+    borderRadius: 16,
+    backgroundColor: COLORS.black,
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 10,
+  },
+  pendingButtonText: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontFamily: F.bold,
+    letterSpacing: 0,
+    color: COLORS.white,
+    textAlign: "center",
   },
 });

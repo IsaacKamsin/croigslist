@@ -3,6 +3,7 @@ import { KeyboardScreen, keyboardScrollProps } from "@/components/KeyboardScreen
 import { useAuth } from "@/context/AuthContext";
 import { hapticLight } from "@/hooks/useHaptics";
 import { formatUsd } from "@/lib/formatters";
+import { getMessageModerationError } from "@/lib/message-moderation";
 import {
   deleteConversation,
   fetchConversationContext,
@@ -16,6 +17,7 @@ import { backOrReplace } from "@/lib/navigation";
 import {
   applyOfferClosures,
   buildOfferClosures,
+  cancelAcceptedListingOffer,
   cancelListingOffer,
   fetchConversationOffers,
   normalizePendingOffers,
@@ -24,6 +26,7 @@ import {
   type OfferStatus,
 } from "@/lib/offers-db";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import * as ImagePicker from "expo-image-picker";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { CaretLeftIcon, DotsThreeIcon } from "phosphor-react-native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -37,6 +40,7 @@ import {
   Text,
   TextInput,
   View,
+  type AlertButton,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 
@@ -54,17 +58,24 @@ async function openPartnerLink(url: string) {
 
 // ── Bubble ────────────────────────────────────────────────────────
 function Bubble({ msg }: { msg: ConversationMessage }) {
+  const showText = msg.text && (!msg.imageUrl || msg.text !== "Photo");
   return (
     <View style={[styles.bubbleRow, msg.fromMe && styles.bubbleRowMe]}>
       <View
         style={[
           styles.bubble,
+          msg.imageUrl && styles.imageBubble,
           msg.fromMe ? styles.bubbleMe : styles.bubbleThem,
         ]}
       >
-        <Text style={[styles.bubbleText, msg.fromMe && styles.bubbleTextMe]}>
-          {msg.text}
-        </Text>
+        {msg.imageUrl ? (
+          <Image source={{ uri: msg.imageUrl }} style={styles.bubbleImage} />
+        ) : null}
+        {showText ? (
+          <Text style={[styles.bubbleText, msg.fromMe && styles.bubbleTextMe]}>
+            {msg.text}
+          </Text>
+        ) : null}
       </View>
       <Text style={[styles.bubbleTime, msg.fromMe && styles.bubbleTimeMe]}>
         {msg.time}
@@ -224,7 +235,10 @@ function isOfferMessage(body: string) {
 }
 
 function isOfferStatusMessage(body: string) {
-  return /^(Accepted|Declined|Cancelled) offer:\s*\$[\d,]+/i.test(body);
+  return (
+    /^(Accepted|Declined|Cancelled) offer:\s*\$[\d,]+/i.test(body) ||
+    /^Cancelled sale:\s*\$[\d,]+/i.test(body)
+  );
 }
 
 const DECLINE_REASONS = [
@@ -329,6 +343,7 @@ export default function ConversationScreen() {
   const { member } = useAuth();
   const isArchived = archived === "1";
   const [headerAvatarFailed, setHeaderAvatarFailed] = useState(false);
+  const [isSendingImage, setIsSendingImage] = useState(false);
   const { data: conversationContext, refetch: refetchContext } = useQuery({
     queryKey: ["conversation-context", id],
     queryFn: () => fetchConversationContext(id),
@@ -500,6 +515,13 @@ export default function ConversationScreen() {
       historicalOffers: offers.filter((offer) => !visibleIds.has(offer.id)),
     };
   }, [offers]);
+  const acceptedSaleOffer = useMemo(
+    () =>
+      [...offers]
+        .filter((offer) => offer.status === "accepted")
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0] ?? null,
+    [offers],
+  );
 
   useFocusEffect(
     useCallback(() => {
@@ -546,6 +568,12 @@ export default function ConversationScreen() {
   const send = useCallback(async () => {
     const text = draft.trim();
     if (!text || !id) return;
+    const moderationError = getMessageModerationError(text);
+    if (moderationError) {
+      Alert.alert("Message not sent", moderationError);
+      return;
+    }
+
     hapticLight();
     const msgId = Date.now().toString();
     setMessages((prev) => [
@@ -567,12 +595,75 @@ export default function ConversationScreen() {
       setMessages((prev) =>
         prev.map((m) => (m.id === msgId ? { ...m, time: "now" } : m)),
       );
-    } catch {
+    } catch (error) {
       setMessages((prev) =>
         prev.map((m) => (m.id === msgId ? { ...m, time: "failed" } : m)),
       );
+      Alert.alert(
+        "Message not sent",
+        error instanceof Error ? error.message : "Try again in a moment.",
+      );
     }
   }, [draft, id, queryClient]);
+  const sendImage = useCallback(async () => {
+    if (!id || isSendingImage) return;
+
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("Photo access needed", "Allow photo access to send a picture.");
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ["images"],
+      allowsEditing: false,
+      quality: 0.82,
+      base64: true,
+    });
+    const asset = result.assets?.[0];
+    if (result.canceled || !asset?.uri) return;
+
+    hapticLight();
+    setIsSendingImage(true);
+    const msgId = `local-image-${Date.now()}`;
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: msgId,
+        text: "Photo",
+        imageUrl: asset.uri,
+        fromMe: true,
+        time: "sending...",
+        createdAt: new Date().toISOString(),
+      },
+    ]);
+    setTimeout(() => listRef.current?.scrollToEnd({ animated: true }), 50);
+
+    try {
+      await sendConversationMessage(id, "", {
+        imageUri: asset.uri,
+        imageData: {
+          base64: asset.base64 ?? undefined,
+          mimeType: asset.mimeType ?? "image/jpeg",
+        },
+      });
+      queryClient.invalidateQueries({ queryKey: ["message-threads"] });
+      queryClient.invalidateQueries({ queryKey: ["conversation-messages", id] });
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, time: "now" } : m)),
+      );
+    } catch (error) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, time: "failed" } : m)),
+      );
+      Alert.alert(
+        "Photo not sent",
+        error instanceof Error ? error.message : "Try again in a moment.",
+      );
+    } finally {
+      setIsSendingImage(false);
+    }
+  }, [id, isSendingImage, queryClient]);
   const respondToOffer = useCallback(
     async (offer: ListingOffer, status: "accepted" | "declined", declineReason?: string) => {
       hapticLight();
@@ -621,6 +712,48 @@ export default function ConversationScreen() {
     },
     [id, queryClient],
   );
+  const cancelAcceptedSale = useCallback(
+    async (offer: ListingOffer) => {
+      hapticLight();
+      const message = `Cancelled sale: ${formatUsd(offer.amount)}. Buyer and seller agreed not to complete this deal.`;
+
+      try {
+        await cancelAcceptedListingOffer({ offer, message });
+      } catch (error) {
+        Alert.alert(
+          "Could not cancel sale",
+          error instanceof Error ? error.message : "Try again in a moment.",
+        );
+        return;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["conversation-offers", id] });
+      queryClient.invalidateQueries({ queryKey: ["conversation-messages", id] });
+      queryClient.invalidateQueries({ queryKey: ["message-threads"] });
+      queryClient.invalidateQueries({ queryKey: ["home"] });
+      queryClient.invalidateQueries({ queryKey: ["shops-tab"] });
+      queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["listing", offer.listingId] });
+      queryClient.invalidateQueries({ queryKey: ["listing-top-offer", offer.listingId] });
+    },
+    [id, queryClient],
+  );
+  const confirmCancelAcceptedSale = useCallback(() => {
+    if (!acceptedSaleOffer) return;
+
+    Alert.alert(
+      "Cancel sale?",
+      "This will mark the accepted offer as cancelled and move the listing back to active.",
+      [
+        { text: "Keep sale", style: "cancel" },
+        {
+          text: "Cancel sale",
+          style: "destructive",
+          onPress: () => cancelAcceptedSale(acceptedSaleOffer),
+        },
+      ],
+    );
+  }, [acceptedSaleOffer, cancelAcceptedSale]);
   const archiveConversation = useCallback(async () => {
     hapticLight();
     try {
@@ -675,16 +808,34 @@ export default function ConversationScreen() {
   }, [archiveConversation, isArchived, restoreArchivedConversation]);
   const openThreadMenu = useCallback(() => {
     hapticLight();
-    Alert.alert(name, contextTitle, [
+    const actions: AlertButton[] = [
       { text: "Cancel", style: "cancel" },
       { text: "Reply", onPress: () => inputRef.current?.focus() },
+      ...(acceptedSaleOffer
+        ? [
+            {
+              text: "Cancel sale",
+              style: "destructive" as const,
+              onPress: confirmCancelAcceptedSale,
+            },
+          ]
+        : []),
       {
         text: isArchived ? "Restore" : "Archive",
         style: isArchived ? "default" : "destructive",
         onPress: confirmArchiveConversation,
       },
-    ]);
-  }, [confirmArchiveConversation, contextTitle, isArchived, name]);
+    ];
+
+    Alert.alert(name, contextTitle, actions);
+  }, [
+    acceptedSaleOffer,
+    confirmArchiveConversation,
+    confirmCancelAcceptedSale,
+    contextTitle,
+    isArchived,
+    name,
+  ]);
   const declineOffer = useCallback(
     (offer: ListingOffer) => {
       Alert.alert(
@@ -788,6 +939,15 @@ export default function ConversationScreen() {
         />
 
         <View style={styles.compose}>
+          <Pressable
+            style={[styles.photoBtn, isSendingImage && styles.photoBtnDisabled]}
+            onPress={sendImage}
+            disabled={isSendingImage}
+            accessibilityRole="button"
+            accessibilityLabel="Send photo"
+          >
+            <Text style={styles.photoBtnText}>+</Text>
+          </Pressable>
           <TextInput
             ref={inputRef}
             style={styles.input}
@@ -986,6 +1146,16 @@ const styles = StyleSheet.create({
   bubbleRow: { alignItems: "flex-start", gap: 4 },
   bubbleRowMe: { alignItems: "flex-end" },
   bubble: { maxWidth: "78%", paddingHorizontal: 14, paddingVertical: 10 },
+  imageBubble: {
+    paddingHorizontal: 4,
+    paddingVertical: 4,
+  },
+  bubbleImage: {
+    width: 212,
+    height: 212,
+    borderRadius: 4,
+    backgroundColor: COLORS.surfaceRaised,
+  },
   bubbleMe: { backgroundColor: COLORS.accent },
   bubbleThem: { backgroundColor: COLORS.black },
   bubbleText: {
@@ -1286,6 +1456,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 11,
     maxHeight: 100,
+  },
+  photoBtn: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+    backgroundColor: COLORS.white,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoBtnDisabled: {
+    opacity: 0.4,
+  },
+  photoBtnText: {
+    fontSize: 28,
+    lineHeight: 30,
+    fontFamily: F.regular,
+    color: COLORS.textPrimary,
   },
   sendBtn: {
     backgroundColor: COLORS.black,

@@ -753,6 +753,7 @@ function BuilderDashboard({
       queryClient.invalidateQueries({ queryKey: ["shops-tab"] });
       queryClient.invalidateQueries({ queryKey: ["search-listings"] });
       queryClient.invalidateQueries({ queryKey: ["listing-category"] });
+      queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
       queryClient.invalidateQueries({ queryKey: ["listing", selectedOffer.listingId] });
       queryClient.invalidateQueries({ queryKey: ["listing-top-offer", selectedOffer.listingId] });
       queryClient.invalidateQueries({ queryKey: ["message-threads"] });
