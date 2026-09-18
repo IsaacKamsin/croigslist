@@ -80,6 +80,7 @@ type ProfileRow = {
 
 interface AuthContextType extends AuthState {
   signIn: (email: string, password: string) => Promise<void>;
+  sendPasswordReset: (email: string) => Promise<void>;
   signOut: () => Promise<void>;
   applyForMembership: (application: AccountApplication) => Promise<ApplyResult>;
   refreshMemberProfile: () => Promise<MemberStatus>;
@@ -336,6 +337,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await setSessionState(data.session);
   }, [setSessionState]);
 
+  const sendPasswordReset = useCallback(async (email: string) => {
+    assertSupabaseConfigured();
+    const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+      redirectTo:
+        process.env.EXPO_PUBLIC_AUTH_REDIRECT_URL ??
+        "croigslist://auth/callback",
+    });
+
+    if (error) throw error;
+  }, []);
+
   const signOut = useCallback(async () => {
     assertSupabaseConfigured();
     const { error } = await supabase.auth.signOut();
@@ -403,6 +415,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ...state,
       signIn,
+      sendPasswordReset,
       signOut,
       applyForMembership,
       refreshMemberProfile,
@@ -412,6 +425,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     [
       state,
       signIn,
+      sendPasswordReset,
       signOut,
       applyForMembership,
       refreshMemberProfile,

@@ -18,6 +18,10 @@ type NotificationEventType =
   | "sold_listing"
   | "moving_fast"
   | "fresh_listing"
+  | "builder_followed"
+  | "followed_builder_listing"
+  | "followed_builder_offer"
+  | "followed_builder_sold"
   | "rare_find"
   | "price_drop"
   | "still_available"
@@ -53,6 +57,23 @@ type MessageNotificationInput = {
   senderName?: string;
   listingTitle?: string;
   body?: string;
+};
+
+type BuilderFollowerNotificationInput = {
+  followerIds: string[];
+  builderName?: string;
+  listingId?: string;
+  offerId?: string;
+  listingTitle?: string;
+  year?: number | string;
+  make?: string;
+  model?: string;
+  amount?: number;
+};
+
+type BuilderFollowNotificationInput = {
+  builderId: string;
+  followerName?: string;
 };
 
 function bikeName(input: BikeNotificationInput) {
@@ -252,6 +273,55 @@ export async function notifyFreshListing(input: BikeNotificationInput) {
     referenceId: input.listingId,
     title: "Fresh listing",
     body: `New bike just posted: ${bikeName(input) || "open the listing"}.`,
+    data: { listingId: input.listingId },
+  });
+}
+
+export async function notifyFollowedBuilderListing(input: BuilderFollowerNotificationInput) {
+  const listingTitle =
+    input.listingTitle ||
+    [input.year, input.make, input.model].filter(Boolean).join(" ") ||
+    "a new bike";
+
+  await sendNotification({
+    userIds: input.followerIds,
+    eventType: "followed_builder_listing",
+    referenceId: input.listingId,
+    title: input.builderName ? `${input.builderName} listed a bike` : "Builder you follow listed a bike",
+    body: `${listingTitle} is live now.`,
+    data: { listingId: input.listingId },
+  });
+}
+
+export async function notifyBuilderFollowed(input: BuilderFollowNotificationInput) {
+  await sendNotification({
+    userIds: [input.builderId],
+    eventType: "builder_followed",
+    referenceId: input.builderId,
+    title: "New follower",
+    body: `${input.followerName || "Someone"} followed your garage.`,
+    data: { builderId: input.builderId },
+  });
+}
+
+export async function notifyFollowedBuilderOffer(input: BuilderFollowerNotificationInput) {
+  await sendNotification({
+    userIds: input.followerIds,
+    eventType: "followed_builder_offer",
+    referenceId: input.offerId,
+    title: "Offer made",
+    body: `${input.listingTitle || "A bike"} from a builder you follow got a ${formatUsd(input.amount ?? 0)} offer.`,
+    data: { offerId: input.offerId },
+  });
+}
+
+export async function notifyFollowedBuilderSold(input: BuilderFollowerNotificationInput) {
+  await sendNotification({
+    userIds: input.followerIds,
+    eventType: "followed_builder_sold",
+    referenceId: input.listingId,
+    title: "Sold by a builder you follow",
+    body: `${input.listingTitle || [input.make, input.model].filter(Boolean).join(" ") || "A bike"} just sold.`,
     data: { listingId: input.listingId },
   });
 }

@@ -88,18 +88,23 @@ function OfferCard({
   offer,
   canRespond,
   canCancel,
+  canCancelSale,
   onAccept,
   onDecline,
   onCancel,
+  onCancelSale,
 }: {
   offer: ListingOffer;
   canRespond: boolean;
   canCancel: boolean;
+  canCancelSale: boolean;
   onAccept: () => void;
   onDecline: () => void;
   onCancel: () => void;
+  onCancelSale: () => void;
 }) {
   const pending = offer.status === "pending";
+  const accepted = offer.status === "accepted";
   const statusLabel =
     offer.status === "accepted"
       ? "Accepted"
@@ -158,6 +163,16 @@ function OfferCard({
         <View style={styles.offerActions}>
           <Pressable style={styles.offerCancelButton} onPress={onCancel}>
             <Text style={styles.offerDeclineText}>Cancel offer</Text>
+          </Pressable>
+        </View>
+      ) : canCancelSale && accepted ? (
+        <View style={styles.saleActionBlock}>
+          <Text style={styles.offerHelp}>
+            Sale is in progress. If either side backs out, cancel the sale to
+            reopen the listing and keep the thread accurate.
+          </Text>
+          <Pressable style={styles.saleCancelButton} onPress={onCancelSale}>
+            <Text style={styles.saleCancelText}>Cancel sale</Text>
           </Pressable>
         </View>
       ) : (
@@ -669,7 +684,7 @@ export default function ConversationScreen() {
       hapticLight();
       const message =
         status === "accepted"
-          ? `Accepted offer: ${formatUsd(offer.amount)}. Let's use KeySavvy for payment and title, then coordinate pickup or shipping.`
+          ? `Accepted offer: ${formatUsd(offer.amount)}. Sale is pending. Use KeySavvy for payment/title when ready, and keep pickup or shipping details in this thread.`
           : `Declined offer: ${formatUsd(offer.amount)}. ${declineReason || DECLINE_REASONS[0]}`;
 
       try {
@@ -715,7 +730,7 @@ export default function ConversationScreen() {
   const cancelAcceptedSale = useCallback(
     async (offer: ListingOffer) => {
       hapticLight();
-      const message = `Cancelled sale: ${formatUsd(offer.amount)}. Buyer and seller agreed not to complete this deal.`;
+      const message = `Cancelled sale: ${formatUsd(offer.amount)}. The deal is off, and the listing is back on the market.`;
 
       try {
         await cancelAcceptedListingOffer({ offer, message });
@@ -903,9 +918,24 @@ export default function ConversationScreen() {
                           offer={offer}
                           canRespond={isOfferSeller}
                           canCancel={!isOfferSeller && isOfferBuyer}
+                          canCancelSale={offer.status === "accepted" && (isOfferSeller || isOfferBuyer)}
                           onAccept={() => respondToOffer(offer, "accepted")}
                           onDecline={() => declineOffer(offer)}
                           onCancel={() => cancelOffer(offer)}
+                          onCancelSale={() => {
+                            Alert.alert(
+                              "Cancel sale?",
+                              "This will mark the accepted offer as cancelled and move the listing back to active.",
+                              [
+                                { text: "Keep sale", style: "cancel" },
+                                {
+                                  text: "Cancel sale",
+                                  style: "destructive",
+                                  onPress: () => cancelAcceptedSale(offer),
+                                },
+                              ],
+                            );
+                          }}
                         />
                         {offer.status === "accepted" ? <TransactionPartnerCard /> : null}
                       </View>
@@ -1292,6 +1322,9 @@ const styles = StyleSheet.create({
     gap: 10,
     marginTop: 12,
   },
+  saleActionBlock: {
+    gap: 12,
+  },
   offerDeclineButton: {
     flex: 1,
     minHeight: 44,
@@ -1327,6 +1360,19 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontFamily: F.bold,
     color: COLORS.white,
+  },
+  saleCancelButton: {
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: COLORS.error,
+    borderRadius: 6,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  saleCancelText: {
+    fontSize: 15,
+    fontFamily: F.bold,
+    color: COLORS.error,
   },
   transactionCard: {
     borderWidth: 1,

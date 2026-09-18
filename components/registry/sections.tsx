@@ -112,9 +112,13 @@ const GridCard = React.memo(
   ({
     item,
     onPress,
+    onSave,
+    isSaved,
   }: {
     item: RegistryListing;
     onPress: () => void;
+    onSave?: () => void;
+    isSaved?: boolean;
   }) => (
     <Pressable style={s.gridCard} onPress={onPress}>
       <View style={s.gridCardImgWrap}>
@@ -131,9 +135,22 @@ const GridCard = React.memo(
             <Text style={s.gridCardViewerText}>{item.viewers}</Text>
           </View>
         )}
-        <View style={s.gridCardHeart}>
-          <HeartIcon color={COLORS.white} size={25} weight="bold" />
-        </View>
+        <Pressable
+          style={s.gridCardHeart}
+          onPress={(event) => {
+            event.stopPropagation();
+            onSave?.();
+          }}
+          hitSlop={8}
+          accessibilityRole="button"
+          accessibilityLabel={isSaved ? "Bike saved" : "Save bike"}
+        >
+          <HeartIcon
+            color={COLORS.white}
+            size={25}
+            weight={isSaved ? "fill" : "bold"}
+          />
+        </Pressable>
       </View>
       <Text style={s.gridCardMeta}>
         {item.year} · {item.make}
@@ -153,12 +170,16 @@ export const ListingGridSection = React.memo(
     items,
     goListing,
     onSeeAll,
+    onSaveListing,
+    savedListingIds,
   }: {
     title: string;
     sub?: string;
     items: RegistryListing[];
     goListing: (id: string) => void;
     onSeeAll?: () => void;
+    onSaveListing?: (item: RegistryListing) => void;
+    savedListingIds?: Set<string>;
   }) => (
     <View>
       <SectionHead title={title} sub={sub} onSeeAll={onSeeAll} />
@@ -173,6 +194,8 @@ export const ListingGridSection = React.memo(
           <GridCard
             item={item}
             onPress={() => goListing(item.id)}
+            onSave={onSaveListing ? () => onSaveListing(item) : undefined}
+            isSaved={savedListingIds?.has(item.id)}
           />
         )}
       />

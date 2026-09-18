@@ -1,4 +1,4 @@
-import { Alert, View, Text, TextInput, StyleSheet, Pressable, ScrollView, Dimensions } from 'react-native';
+import { Alert, View, Text, TextInput, StyleSheet, Pressable, ScrollView, Dimensions, InteractionManager } from 'react-native';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Image } from 'expo-image';
@@ -179,11 +179,24 @@ export default function CreateListingScreen() {
       return;
     }
 
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ['images'],
-      quality: 0.8,
-      base64: true,
-    });
+    let result: ImagePicker.ImagePickerResult;
+    try {
+      result = await ImagePicker.launchCameraAsync({
+        mediaTypes: ['images'],
+        quality: 0.8,
+        base64: true,
+      });
+    } catch {
+      Alert.alert(
+        'Camera unavailable',
+        'Choose photos from your library instead.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Choose photos', onPress: pickPhotos },
+        ],
+      );
+      return;
+    }
 
     if (result.canceled) return;
     const asset = result.assets[0];
@@ -196,7 +209,7 @@ export default function CreateListingScreen() {
         mimeType: asset.base64 ? 'image/jpeg' : asset.mimeType ?? 'image/jpeg',
       },
     ].slice(0, MAX_PHOTOS));
-  }, [isBusy, photos.length]);
+  }, [isBusy, photos.length, pickPhotos]);
 
   useEffect(() => {
     if (handledInitialSourceRef.current || isBusy) return;
@@ -204,11 +217,21 @@ export default function CreateListingScreen() {
 
     handledInitialSourceRef.current = true;
     setMode('manual');
-    if (source === 'photo') {
-      takePhoto();
-    } else {
-      pickPhotos();
-    }
+    let timeout: ReturnType<typeof setTimeout> | null = null;
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      timeout = setTimeout(() => {
+        if (source === 'photo') {
+          takePhoto();
+        } else {
+          pickPhotos();
+        }
+      }, 250);
+    });
+
+    return () => {
+      interaction.cancel();
+      if (timeout) clearTimeout(timeout);
+    };
   }, [isBusy, pickPhotos, source, takePhoto]);
 
   const handleImportFB = async () => {
@@ -293,14 +316,16 @@ export default function CreateListingScreen() {
   };
 
   const scrollToFormBottom = () => {
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 120);
+    [120, 360].forEach((delay) => {
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }, delay);
+    });
   };
 
   return (
     <View style={styles.container}>
-      <KeyboardScreen style={styles.container}>
+      <KeyboardScreen style={styles.container} keyboardVerticalOffset={0}>
       <ScrollView
         ref={scrollRef}
         style={styles.container}

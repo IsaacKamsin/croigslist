@@ -30,6 +30,10 @@ type PushRequest = {
     | "sold_listing"
     | "moving_fast"
     | "fresh_listing"
+    | "builder_followed"
+    | "followed_builder_listing"
+    | "followed_builder_offer"
+    | "followed_builder_sold"
     | "rare_find"
     | "price_drop"
     | "still_available"
@@ -51,6 +55,15 @@ type ConversationRow = {
 type OfferRow = {
   buyer_id: string | null;
   seller_id: string | null;
+  listing_id?: string | null;
+};
+
+type ListingRow = {
+  seller_id: string | null;
+};
+
+type BuilderFollowRow = {
+  follower_id: string | null;
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -100,6 +113,22 @@ async function fetchSingle<T>(
   if (!response.ok) throw new Error(await response.text());
   const rows = await response.json() as T[];
   return rows[0] ?? null;
+}
+
+async function fetchRows<T>(
+  supabaseUrl: string,
+  serviceRoleKey: string,
+  path: string,
+) {
+  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    headers: {
+      Authorization: `Bearer ${serviceRoleKey}`,
+      apikey: serviceRoleKey,
+    },
+  });
+
+  if (!response.ok) throw new Error(await response.text());
+  return await response.json() as T[];
 }
 
 async function authorizeClientNotification(params: {
@@ -191,7 +220,76 @@ async function authorizeClientNotification(params: {
     );
   }
 
+  if (
+    (eventType === "followed_builder_listing" ||
+      eventType === "followed_builder_sold") &&
+    referenceId
+  ) {
+    const listing = await fetchSingle<ListingRow>(
+      params.supabaseUrl,
+      params.serviceRoleKey,
+      `listings?id=eq.${referenceId}&select=seller_id`,
+    );
+    if (!listing?.seller_id) return false;
+    if (listing.seller_id !== user.id) return false;
+
+    return recipientsAreBuilderFollowers({
+      supabaseUrl: params.supabaseUrl,
+      serviceRoleKey: params.serviceRoleKey,
+      builderId: listing.seller_id,
+      userIds: params.userIds,
+    });
+  }
+
+  if (eventType === "builder_followed" && referenceId) {
+    if (params.userIds.length !== 1 || !recipients.has(referenceId)) return false;
+    if (referenceId === user.id) return false;
+
+    return recipientsAreBuilderFollowers({
+      supabaseUrl: params.supabaseUrl,
+      serviceRoleKey: params.serviceRoleKey,
+      builderId: referenceId,
+      userIds: [user.id],
+    });
+  }
+
+  if (eventType === "followed_builder_offer" && referenceId) {
+    const offer = await fetchSingle<OfferRow>(
+      params.supabaseUrl,
+      params.serviceRoleKey,
+      `listing_offers?id=eq.${referenceId}&select=buyer_id,seller_id,listing_id`,
+    );
+    if (!offer?.seller_id) return false;
+    if (offer.buyer_id !== user.id && offer.seller_id !== user.id) return false;
+
+    return recipientsAreBuilderFollowers({
+      supabaseUrl: params.supabaseUrl,
+      serviceRoleKey: params.serviceRoleKey,
+      builderId: offer.seller_id,
+      userIds: params.userIds,
+    });
+  }
+
   return false;
+}
+
+async function recipientsAreBuilderFollowers(params: {
+  supabaseUrl: string;
+  serviceRoleKey: string;
+  builderId: string;
+  userIds: string[];
+}) {
+  const rows = await fetchRows<BuilderFollowRow>(
+    params.supabaseUrl,
+    params.serviceRoleKey,
+    `builder_follows?builder_id=eq.${params.builderId}&select=follower_id`,
+  );
+  const followerIds = new Set(
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => row.follower_id)
+      .filter(Boolean),
+  );
+  return params.userIds.every((userId) => followerIds.has(userId));
 }
 
 Deno.serve(async (req) => {

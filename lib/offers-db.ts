@@ -1,6 +1,9 @@
 import { createId } from "@/lib/ids";
+import { fetchBuilderFollowerIds } from "@/lib/builder-follows-db";
 import { sendConversationMessage } from "@/lib/messages-db";
 import {
+  notifyFollowedBuilderOffer,
+  notifyFollowedBuilderSold,
   notifyOfferAccepted,
   notifyOfferDeclined,
   notifyOfferReceived,
@@ -333,6 +336,15 @@ export async function createListingOffer({
     amount,
   });
 
+  const followerIds = (await fetchBuilderFollowerIds(sellerId))
+    .filter((followerId) => followerId !== user.id && followerId !== sellerId);
+  await notifyFollowedBuilderOffer({
+    followerIds,
+    offerId: offer.id,
+    listingTitle: offer.listingTitle,
+    amount,
+  });
+
   return offer;
 }
 
@@ -651,6 +663,24 @@ async function updateListingSaleStatus(
   if (error) throw error;
 }
 
+async function hasAcceptedOfferForListing(offer: ListingOffer) {
+  if (!offer.listingId || !isUuid(offer.listingId)) return true;
+
+  const { data, error } = await supabase
+    .from("listing_offers")
+    .select("id")
+    .eq("listing_id", offer.listingId)
+    .eq("status", "accepted")
+    .limit(1);
+
+  if (error) {
+    if (isMissingOffersSchema(error)) return true;
+    throw error;
+  }
+
+  return Boolean(data?.length);
+}
+
 async function markListingSold(offer: ListingOffer, status: "accepted" | "declined") {
   if (status !== "accepted") return;
   await updateListingSaleStatus(offer, "sold");
@@ -660,6 +690,19 @@ async function markListingSold(offer: ListingOffer, status: "accepted" | "declin
     listingId: offer.listingId,
     make: offer.listingTitle,
   });
+
+  const followerIds = (await fetchBuilderFollowerIds(offer.sellerId))
+    .filter((followerId) => followerId !== offer.sellerId && followerId !== offer.buyerId);
+  await notifyFollowedBuilderSold({
+    followerIds,
+    listingId: offer.listingId,
+    listingTitle: offer.listingTitle,
+  });
+}
+
+async function restoreListingAfterDecline(offer: ListingOffer) {
+  if (await hasAcceptedOfferForListing(offer)) return;
+  await updateListingSaleStatus(offer, "active");
 }
 
 export async function respondToListingOffer({
@@ -679,6 +722,7 @@ export async function respondToListingOffer({
       moderate: false,
     });
     await markListingSold(offer, status);
+    if (status === "declined") await restoreListingAfterDecline(offer);
     return;
   }
 
@@ -725,6 +769,7 @@ export async function respondToListingOffer({
   }
 
   await markListingSold(offer, status);
+  if (status === "declined") await restoreListingAfterDecline(offer);
 }
 
 export async function cancelListingOffer({
@@ -788,21 +833,18 @@ export async function cancelAcceptedListingOffer({
     throw new Error("Only the buyer or seller can cancel this sale.");
   }
 
-  const { data: updated, error } = await supabase
-    .from("listing_offers")
-    .update({ status: "cancelled", updated_at: new Date().toISOString() })
-    .eq("id", offer.id)
-    .in("status", ["accepted"])
-    .select("id");
+  const { data: cancelledRows, error: rpcError } = await supabase.rpc(
+    "cancel_accepted_listing_sale",
+    { offer_id_input: offer.id },
+  );
 
-  if (error) {
-    if (isMissingOffersSchema(error)) return;
-    throw error;
+  if (rpcError) {
+    if (isMissingOffersSchema(rpcError)) return;
+    throw rpcError;
   }
-  if (!updated?.length) {
+  if (!Array.isArray(cancelledRows) || cancelledRows.length === 0) {
     throw new Error("Could not cancel this sale. Refresh and try again.");
   }
 
-  await updateListingSaleStatus(offer, "active");
   await sendConversationMessage(offer.conversationId, message, { moderate: false });
 }

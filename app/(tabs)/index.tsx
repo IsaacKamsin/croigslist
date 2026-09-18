@@ -13,6 +13,7 @@ import {
   updateGarageDetails,
   type GarageDetails,
 } from "@/lib/garage-profile-db";
+import { saveListingToGarage } from "@/lib/garage-db";
 import {
   fetchSellerOffers,
   respondToListingOffer,
@@ -79,6 +80,8 @@ export default function RegistryScreen() {
     base64?: string;
     mimeType?: string;
   } | null>(null);
+  const [savedListingIds, setSavedListingIds] = useState<Set<string>>(() => new Set());
+  const [savingListingIds, setSavingListingIds] = useState<Set<string>>(() => new Set());
   const [savingGarageImage, setSavingGarageImage] = useState(false);
   const { data, isPending, isRefetching, refetch } = useQuery({
     queryKey: ["home", activeView],
@@ -286,6 +289,33 @@ export default function RegistryScreen() {
     router.push("/(tabs)/search");
   }, [router]);
 
+  const saveListing = useCallback(
+    async (listing: RegistryListing) => {
+      if (savedListingIds.has(listing.id) || savingListingIds.has(listing.id)) return;
+
+      hapticLight();
+      setSavingListingIds((current) => new Set(current).add(listing.id));
+      try {
+        await saveListingToGarage(listing);
+        setSavedListingIds((current) => new Set(current).add(listing.id));
+        await queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
+        hapticLight();
+      } catch (error) {
+        Alert.alert(
+          "Could not save bike",
+          error instanceof Error ? error.message : "Try again in a moment.",
+        );
+      } finally {
+        setSavingListingIds((current) => {
+          const next = new Set(current);
+          next.delete(listing.id);
+          return next;
+        });
+      }
+    },
+    [queryClient, savedListingIds, savingListingIds],
+  );
+
   const openSellBikeMenu = useCallback(() => {
     listBikeSheetRef.current?.open();
   }, []);
@@ -421,6 +451,8 @@ export default function RegistryScreen() {
                     items={bikesForSale}
                     goListing={goListing}
                     onSeeAll={goBikes}
+                    onSaveListing={saveListing}
+                    savedListingIds={savedListingIds}
                   />
                 )}
                 {registryData.justListed.length > 0 && (
@@ -430,6 +462,8 @@ export default function RegistryScreen() {
                     items={registryData.justListed}
                     goListing={goListing}
                     onSeeAll={goJustListed}
+                    onSaveListing={saveListing}
+                    savedListingIds={savedListingIds}
                   />
                 )}
                 <BuyerHero
@@ -448,6 +482,8 @@ export default function RegistryScreen() {
                     items={registryData.under5k}
                     goListing={goListing}
                     onSeeAll={goUnder5k}
+                    onSaveListing={saveListing}
+                    savedListingIds={savedListingIds}
                   />
                 )}
                 {registryData.rareFinds.length > 0 && (
@@ -456,6 +492,8 @@ export default function RegistryScreen() {
                     sub="Harder-to-find bikes worth a closer look."
                     items={registryData.rareFinds}
                     goListing={goListing}
+                    onSaveListing={saveListing}
+                    savedListingIds={savedListingIds}
                   />
                 )}
                 {registryData.projectBikes.length > 0 && (
@@ -465,6 +503,8 @@ export default function RegistryScreen() {
                     items={registryData.projectBikes}
                     goListing={goListing}
                     onSeeAll={goProjectBikes}
+                    onSaveListing={saveListing}
+                    savedListingIds={savedListingIds}
                   />
                 )}
                 {shops.length > 0 && (

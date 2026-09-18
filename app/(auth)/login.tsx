@@ -7,7 +7,9 @@ import { backOrReplace } from "@/lib/navigation";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useRouter } from "expo-router";
 import { Controller, useForm } from "react-hook-form";
+import { useState } from "react";
 import {
+  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -22,14 +24,17 @@ const loginSchema = z.object({
   email: z.string().trim().email("Enter a valid email address."),
   password: z.string().min(1, "Password is required."),
 });
+const resetEmailSchema = z.string().trim().email("Enter a valid email address first.");
 
 type LoginForm = z.infer<typeof loginSchema>;
 
 export default function LoginScreen() {
   const router = useRouter();
-  const { signIn } = useAuth();
+  const { sendPasswordReset, signIn } = useAuth();
+  const [isSendingReset, setIsSendingReset] = useState(false);
   const {
     control,
+    getValues,
     handleSubmit,
     setError,
     formState: { errors, isSubmitting },
@@ -46,6 +51,30 @@ export default function LoginScreen() {
       setError("root", {
         message: getAuthErrorMessage(e),
       });
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    const emailResult = resetEmailSchema.safeParse(getValues("email"));
+    if (!emailResult.success) {
+      setError("email", { message: emailResult.error.issues[0]?.message });
+      return;
+    }
+
+    setIsSendingReset(true);
+    try {
+      await sendPasswordReset(emailResult.data);
+      Alert.alert(
+        "Check your email",
+        "We sent a password reset link. Open it on this device to choose a new password.",
+      );
+    } catch (error) {
+      console.warn("Password reset failed.", error);
+      setError("root", {
+        message: getAuthErrorMessage(error),
+      });
+    } finally {
+      setIsSendingReset(false);
     }
   };
 
@@ -120,15 +149,21 @@ export default function LoginScreen() {
           <Pressable
             style={[styles.button, isSubmitting && styles.buttonDisabled]}
             onPress={handleSubmit(handleLogin)}
-            disabled={isSubmitting}
+            disabled={isSubmitting || isSendingReset}
           >
           <Text style={styles.buttonText}>
               {isSubmitting ? "Checking..." : "Continue"}
           </Text>
           </Pressable>
 
-          <Pressable style={styles.forgotBtn}>
-            <Text style={styles.forgotText}>Forgot password?</Text>
+          <Pressable
+            style={styles.forgotBtn}
+            onPress={handleForgotPassword}
+            disabled={isSubmitting || isSendingReset}
+          >
+            <Text style={styles.forgotText}>
+              {isSendingReset ? "Sending reset..." : "Forgot password?"}
+            </Text>
           </Pressable>
         </View>
         </ScrollView>

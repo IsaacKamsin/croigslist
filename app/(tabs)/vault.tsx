@@ -632,6 +632,15 @@ export default function GarageScreen() {
     await savePickedBikePhoto(pickerResult.assets[0], replaceBike);
   };
 
+  const openAddPhotoMenu = () => {
+    hapticLight();
+    Alert.alert("Add bike photo", "Choose a photo source.", [
+      { text: "Camera", onPress: () => handleCameraUpload() },
+      { text: "Photo Library", onPress: () => handleUpload() },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
   const removeBike = useCallback((bike: GarageBike) => {
     const bikeName = [bike.brand, bike.model].filter(Boolean).join(" ") || "this bike";
     Alert.alert(
@@ -733,9 +742,9 @@ export default function GarageScreen() {
               styles.headerCameraButton,
               pressed && styles.headerCameraButtonPressed,
             ]}
-            onPress={() => handleCameraUpload()}
+            onPress={openAddPhotoMenu}
             accessibilityRole="button"
-            accessibilityLabel="Open camera"
+            accessibilityLabel="Add bike photo"
           >
             <CameraIcon size={22} color={COLORS.textPrimary} weight="bold" />
             <Text style={styles.headerCameraText}>ADD</Text>
@@ -828,7 +837,7 @@ export default function GarageScreen() {
                   styles.emptyCta,
                   pressed && styles.emptyCtaPressed,
                 ]}
-                onPress={() => handleCameraUpload()}
+                onPress={openAddPhotoMenu}
               >
                 <Text style={styles.emptyCtaText}>+ ADD PHOTO</Text>
               </Pressable>

@@ -6,6 +6,7 @@ import {
   imageUploadBody,
   type LocalImageData,
 } from "@/lib/image-upload";
+import type { RegistryListing } from "@/lib/registry-db";
 
 export type GarageBikeRecord = {
   id: string;
@@ -144,6 +145,59 @@ export async function createGarageBike(
       image_url: imageUrl,
       image_path: storagePath,
       analysis_status: "pending",
+    })
+    .select(
+      "id, image_url, image_path, brand, model, year_estimate, frame_type, color, condition, vibe, confidence, analysis_status, created_at",
+    )
+    .single<GarageBikeRow>();
+
+  if (error) throw error;
+  return bikeFromRow(data);
+}
+
+export async function saveListingToGarage(listing: RegistryListing) {
+  if (!isSupabaseConfigured) return null;
+  if (!listing.image) throw new Error("This listing does not have a photo to save.");
+
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser();
+
+  if (userError) throw userError;
+  if (!user) throw new Error("Sign in to save bikes.");
+
+  const bikeId = createId();
+  const contentType = contentTypeForUri(listing.image);
+  const extension = extensionForContentType(contentType);
+  const storagePath = `${user.id}/${bikeId}.${extension}`;
+  const uploadBody = await imageUploadBody(listing.image);
+
+  const { error: uploadError } = await supabase.storage
+    .from("garage-bike-images")
+    .upload(storagePath, uploadBody, {
+      contentType,
+      upsert: true,
+    });
+
+  if (uploadError) throw uploadError;
+
+  const { data: signedUrlData } = await supabase.storage
+    .from("garage-bike-images")
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
+
+  const { data, error } = await supabase
+    .from("garage_bikes")
+    .insert({
+      id: bikeId,
+      owner_id: user.id,
+      image_url: signedUrlData?.signedUrl ?? "",
+      image_path: storagePath,
+      brand: listing.make.toUpperCase(),
+      model: listing.model,
+      year_estimate: String(listing.year),
+      condition: listing.condition ?? null,
+      analysis_status: "complete",
     })
     .select(
       "id, image_url, image_path, brand, model, year_estimate, frame_type, color, condition, vibe, confidence, analysis_status, created_at",

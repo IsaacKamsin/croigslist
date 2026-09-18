@@ -7,6 +7,7 @@ import {
   createListingOffer,
   fetchMyPendingOfferForListing,
 } from "@/lib/offers-db";
+import { saveListingToGarage } from "@/lib/garage-db";
 import { fetchListingById } from "@/lib/registry-db";
 import { formatUsd } from "@/lib/formatters";
 import { sendConversationMessage, startConversation } from "@/lib/messages-db";
@@ -29,6 +30,7 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ChatCircleTextIcon,
+  HeartIcon,
   InstagramLogoIcon,
   ShareFatIcon,
   CaretLeftIcon,
@@ -69,15 +71,21 @@ function PhotoCarousel({
   topInset,
   onBack,
   onShare,
+  onSave,
+  isSaved,
 }: {
   images: string[];
   rare: boolean;
   topInset: number;
   onBack: () => void;
   onShare: () => void;
+  onSave: () => void;
+  isSaved: boolean;
 }) {
   const [activeIndex, setActiveIndex] = useState(0);
+  const [zoomLevels, setZoomLevels] = useState<Record<number, number>>({});
   const flatListRef = useRef<FlatList>(null);
+  const activeZoom = zoomLevels[activeIndex] ?? 1;
 
   const onScroll = (e: any) => {
     const index = Math.round(e.nativeEvent.contentOffset.x / width);
@@ -86,9 +94,20 @@ function PhotoCarousel({
       setActiveIndex(index);
     }
   };
+  const changeZoom = (direction: "in" | "out") => {
+    hapticSelection();
+    setZoomLevels((current) => {
+      const currentZoom = current[activeIndex] ?? 1;
+      const nextZoom =
+        direction === "in"
+          ? Math.min(2.5, currentZoom + 0.5)
+          : Math.max(1, currentZoom - 0.5);
+      return { ...current, [activeIndex]: nextZoom };
+    });
+  };
 
   return (
-    <View>
+    <View style={styles.carouselFrame}>
       <Pressable
         style={[styles.photoBackButton, { top: topInset + 10 }]}
         onPress={onBack}
@@ -96,30 +115,47 @@ function PhotoCarousel({
       >
         <CaretLeftIcon size={28} color={COLORS.white} weight="bold" />
       </Pressable>
-      <Pressable
-        style={[styles.photoShareButton, { top: topInset + 10 }]}
-        onPress={onShare}
-        hitSlop={12}
-        accessibilityRole="button"
-        accessibilityLabel="Share listing"
-      >
-        <ShareNetworkIcon size={24} color={COLORS.white} weight="bold" />
-        <Text style={styles.photoShareButtonText}>Share</Text>
-      </Pressable>
+      <View style={[styles.photoActions, { top: topInset + 10 }]}>
+        <Pressable
+          style={styles.photoHeartButton}
+          onPress={onSave}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel={isSaved ? "Bike saved" : "Save bike"}
+        >
+          <HeartIcon size={24} color={COLORS.white} weight={isSaved ? "fill" : "bold"} />
+        </Pressable>
+        <Pressable
+          style={styles.photoShareButton}
+          onPress={onShare}
+          hitSlop={12}
+          accessibilityRole="button"
+          accessibilityLabel="Share listing"
+        >
+          <ShareNetworkIcon size={24} color={COLORS.white} weight="bold" />
+          <Text style={styles.photoShareButtonText}>Share</Text>
+        </Pressable>
+      </View>
       <FlatList
         ref={flatListRef}
+        style={styles.carouselList}
         data={images}
         keyExtractor={(_, i) => String(i)}
         horizontal
         pagingEnabled
         showsHorizontalScrollIndicator={false}
         onMomentumScrollEnd={onScroll}
-        renderItem={({ item }) => (
+        renderItem={({ item, index }) => {
+          const zoom = zoomLevels[index] ?? 1;
+          return (
           <View style={styles.carouselSlide}>
             {item ? (
               <Image
                 source={{ uri: item }}
-                style={styles.carouselImage}
+                style={[
+                  styles.carouselImage,
+                  zoom > 1 && { transform: [{ scale: zoom }] },
+                ]}
                 contentFit="cover"
                 cachePolicy={IMAGE_CACHE}
               />
@@ -129,7 +165,8 @@ function PhotoCarousel({
               </View>
             )}
           </View>
-        )}
+          );
+        }}
       />
 
       {rare && (
@@ -152,6 +189,27 @@ function PhotoCarousel({
           {activeIndex + 1}/{images.length}
         </Text>
       </View>
+
+      <View style={styles.zoomControls}>
+        <Pressable
+          style={[styles.zoomButton, activeZoom <= 1 && styles.zoomButtonDisabled]}
+          onPress={() => changeZoom("out")}
+          disabled={activeZoom <= 1}
+          accessibilityRole="button"
+          accessibilityLabel="Zoom out"
+        >
+          <Text style={styles.zoomButtonText}>-</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.zoomButton, activeZoom >= 2.5 && styles.zoomButtonDisabled]}
+          onPress={() => changeZoom("in")}
+          disabled={activeZoom >= 2.5}
+          accessibilityRole="button"
+          accessibilityLabel="Zoom in"
+        >
+          <Text style={styles.zoomButtonText}>+</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -169,6 +227,8 @@ export default function ListingDetailScreen() {
   const shareSnapPoints = useMemo(() => ["25%"], []);
   const [selectedOffer, setSelectedOffer] = useState<"asking" | "near" | "low" | "custom">("custom");
   const [customOffer, setCustomOffer] = useState("");
+  const [isSaved, setIsSaved] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const { data: listing, isPending } = useQuery({
     queryKey: ["listing", id],
     queryFn: () => fetchListingById(id),
@@ -241,13 +301,14 @@ export default function ListingDetailScreen() {
     activeView === "builder" && member?.id && listing.sellerId === member.id,
   );
   const canMakeOffer = listing.status === "active";
+  const canMessageSeller = listing.status !== "sold";
 
   const openOfferSheet = () => {
     if (!canMakeOffer) {
       Alert.alert(
         listing.status === "sold" ? "Bike sold" : "Offer unavailable",
         listing.status === "sold"
-          ? "This bike has already sold. You can still message the seller."
+          ? "This bike has already sold."
           : "This bike has a pending meet-up. You can still message the seller.",
       );
       return;
@@ -274,6 +335,26 @@ export default function ListingDetailScreen() {
     shareSheetRef.current?.present();
   };
 
+  const saveListing = async () => {
+    if (isSaved || isSaving) return;
+
+    hapticSelection();
+    setIsSaving(true);
+    try {
+      await saveListingToGarage(listing);
+      setIsSaved(true);
+      await queryClient.invalidateQueries({ queryKey: ["profile-stats"] });
+      hapticSelection();
+    } catch (error) {
+      Alert.alert(
+        "Could not save bike",
+        error instanceof Error ? error.message : "Try again in a moment.",
+      );
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   const safelyShare = async (shareAction: () => Promise<void>) => {
     shareSheetRef.current?.dismiss();
     try {
@@ -287,6 +368,11 @@ export default function ListingDetailScreen() {
   };
 
   const messageSeller = async () => {
+    if (!canMessageSeller) {
+      Alert.alert("Bike sold", "This bike has already sold.");
+      return;
+    }
+
     hapticMedium();
     try {
       const conversationId = await startConversation({
@@ -318,7 +404,7 @@ export default function ListingDetailScreen() {
       Alert.alert(
         listing.status === "sold" ? "Bike sold" : "Offer unavailable",
         listing.status === "sold"
-          ? "This bike has already sold. You can still message the seller."
+          ? "This bike has already sold."
           : "This bike has a pending meet-up. You can still message the seller.",
       );
       return;
@@ -411,6 +497,8 @@ export default function ListingDetailScreen() {
           topInset={insets.top}
           onBack={() => backOrReplace(router, "/(tabs)")}
           onShare={handleShareListing}
+          onSave={saveListing}
+          isSaved={isSaved}
         />
 
         <View style={styles.titleBlock}>
@@ -496,13 +584,30 @@ export default function ListingDetailScreen() {
         ) : (
           <View style={styles.listingActions}>
             <Pressable
-              style={styles.messageButton}
+              style={[
+                styles.messageButton,
+                !canMessageSeller && styles.messageButtonDisabled,
+              ]}
               onPress={messageSeller}
+              disabled={!canMessageSeller}
               accessibilityRole="button"
-              accessibilityLabel="Message seller about this bike"
+              accessibilityLabel={
+                canMessageSeller ? "Message seller about this bike" : "Bike sold"
+              }
             >
-              <ChatCircleTextIcon size={21} color={COLORS.white} weight="bold" />
-              <Text style={styles.messageButtonText}>Message</Text>
+              <ChatCircleTextIcon
+                size={21}
+                color={canMessageSeller ? COLORS.white : COLORS.textMuted}
+                weight="bold"
+              />
+              <Text
+                style={[
+                  styles.messageButtonText,
+                  !canMessageSeller && styles.messageButtonTextDisabled,
+                ]}
+              >
+                Message
+              </Text>
             </Pressable>
             {canMakeOffer ? (
               <Pressable style={styles.offerButton} onPress={openOfferSheet}>
@@ -515,7 +620,7 @@ export default function ListingDetailScreen() {
                   {listing.status === "sold" ? "Sold" : "Meet pending"}
                 </Text>
                 <Text style={[styles.offerButtonSubtext, styles.offerButtonUnavailableText]}>
-                  Message seller
+                  {listing.status === "sold" ? "No longer available" : "Message seller"}
                 </Text>
               </View>
             )}
@@ -663,10 +768,21 @@ const styles = StyleSheet.create({
   },
 
   // Carousel
+  carouselFrame: {
+    width: width,
+    height: width * 1.08,
+    backgroundColor: COLORS.black,
+    overflow: "hidden",
+  },
+  carouselList: {
+    width: "100%",
+    height: "100%",
+  },
   carouselSlide: {
     width: width,
     height: width * 1.08,
-    backgroundColor: COLORS.surface,
+    backgroundColor: COLORS.black,
+    overflow: "hidden",
   },
   carouselImage: S.cardImage,
   carouselImageFallback: {
@@ -692,10 +808,23 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  photoShareButton: {
+  photoActions: {
     position: "absolute",
     right: SPACING.page,
     zIndex: 5,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  photoHeartButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: COLORS.overlay35,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  photoShareButton: {
     minWidth: 82,
     height: 44,
     borderRadius: 22,
@@ -756,6 +885,31 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontFamily: F.monoBold,
     letterSpacing: 1,
+    color: COLORS.white,
+  },
+  zoomControls: {
+    position: "absolute",
+    left: SPACING.page,
+    bottom: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  zoomButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: COLORS.overlay50,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  zoomButtonDisabled: {
+    opacity: 0.35,
+  },
+  zoomButtonText: {
+    fontSize: 20,
+    lineHeight: 22,
+    fontFamily: F.bold,
     color: COLORS.white,
   },
 
@@ -930,11 +1084,19 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 2,
   },
+  messageButtonDisabled: {
+    backgroundColor: COLORS.surfaceRaised,
+    borderWidth: 1,
+    borderColor: COLORS.divider,
+  },
   messageButtonText: {
     fontSize: 11,
     lineHeight: 13,
     fontFamily: F.bold,
     color: COLORS.white,
+  },
+  messageButtonTextDisabled: {
+    color: COLORS.textMuted,
   },
   offerButton: {
     ...S.primaryButton,

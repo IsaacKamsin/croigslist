@@ -43,6 +43,7 @@ export default function AuthCallbackScreen() {
       const urlError = params.get("error_description") ?? params.get("error");
       if (urlError) throw new Error(urlError);
 
+      const type = params.get("type");
       const code = params.get("code");
       const accessToken = params.get("access_token");
       const refreshToken = params.get("refresh_token");
@@ -62,7 +63,9 @@ export default function AuthCallbackScreen() {
       }
 
       await refreshMemberProfile();
-      if (!cancelled) router.replace("/(tabs)");
+      if (!cancelled) {
+        router.replace(type === "recovery" ? "/auth/reset-password" : "/(tabs)");
+      }
     }
 
     completeAuth().catch((callbackError) => {

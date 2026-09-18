@@ -2,6 +2,7 @@ import { COLORS, F, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
 import { useAuth } from "@/context/AuthContext";
 import {
+  createAnnualCheckoutSession,
   createAnnualPaymentSheet,
   syncAnnualMembership,
 } from "@/lib/payments";
@@ -151,12 +152,21 @@ export function PaymentMembershipSheet() {
       }
     } catch (checkoutError) {
       console.warn(
-        "Checkout failed.",
+        "Native checkout failed; opening hosted checkout.",
         checkoutError instanceof Error ? checkoutError.message : checkoutError,
       );
-      setError(
-        getPaymentErrorMessage(checkoutError),
-      );
+      try {
+        await openHostedCheckout();
+        setError(null);
+      } catch (fallbackError) {
+        console.warn(
+          "Hosted checkout failed.",
+          fallbackError instanceof Error ? fallbackError.message : fallbackError,
+        );
+        setError(
+          getPaymentErrorMessage(fallbackError),
+        );
+      }
     } finally {
       setIsOpening(false);
       setIsRefreshing(false);
@@ -211,6 +221,17 @@ export function PaymentMembershipSheet() {
   const startMembershipFromResult = () => {
     setCheckResult(null);
     openCheckout();
+  };
+
+  const openHostedCheckout = async () => {
+    const returnParam = returnTo?.startsWith("/")
+      ? `?returnTo=${encodeURIComponent(returnTo)}`
+      : "";
+    const checkoutUrl = await createAnnualCheckoutSession({
+      successUrl: `croigslist://payment${returnParam}`,
+      cancelUrl: `croigslist://payment${returnParam}`,
+    });
+    await Linking.openURL(checkoutUrl);
   };
 
   const renderBackdrop = useCallback(

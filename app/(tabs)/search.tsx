@@ -996,7 +996,17 @@ const styles = StyleSheet.create({
   },
 
   // Empty state (searched, no results)
-  empty: S.emptyContainer,
+  empty: {
+    ...S.emptyContainer,
+    width: "100%",
+    paddingHorizontal: SPACING.page,
+  },
   emptyTitle: S.emptyTitle,
-  emptyBody: S.emptyBody,
+  emptyBody: {
+    ...S.emptyBody,
+    width: "100%",
+    maxWidth: 320,
+    alignSelf: "center",
+    flexShrink: 1,
+  },
 });

@@ -1,14 +1,20 @@
 import { StatusState } from "@/components/StatusState";
 import { COLORS, F, IMAGE_CACHE, SPACING } from "@/constants/design";
 import { S } from "@/constants/styles";
+import {
+  fetchBuilderFollowState,
+  followBuilder,
+  unfollowBuilder,
+} from "@/lib/builder-follows-db";
 import { formatUsd } from "@/lib/formatters";
 import { startConversation } from "@/lib/messages-db";
 import { backOrReplace } from "@/lib/navigation";
 import { fetchBuilderProfile, type RegistryListing } from "@/lib/registry-db";
 import { Image } from "expo-image";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  Alert,
   Dimensions,
   Pressable,
   RefreshControl,
@@ -40,10 +46,35 @@ type SellerProfile = {
 export default function BuilderProfileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const { data: builder, isPending, isRefetching, refetch } = useQuery({
     queryKey: ["builder-profile", id],
     queryFn: () => fetchBuilderProfile(id) as Promise<SellerProfile | null>,
     enabled: Boolean(id),
+  });
+  const { data: followState } = useQuery({
+    queryKey: ["builder-follow", id],
+    queryFn: () => fetchBuilderFollowState(id),
+    enabled: Boolean(id),
+  });
+  const followMutation = useMutation({
+    mutationFn: async () => {
+      if (!id) return;
+      if (followState?.isFollowing) {
+        await unfollowBuilder(id);
+      } else {
+        await followBuilder(id);
+      }
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ["builder-follow", id] });
+    },
+    onError: (error) => {
+      Alert.alert(
+        "Could not update follow",
+        error instanceof Error ? error.message : "Try again in a moment.",
+      );
+    },
   });
 
   if (isPending) {
@@ -130,7 +161,34 @@ export default function BuilderProfileScreen() {
           <Pressable style={styles.contactButton} onPress={handleMessage}>
             <Text style={styles.contactButtonText}>Message seller</Text>
           </Pressable>
+          <Pressable
+            style={[
+              styles.followButton,
+              followState?.isFollowing ? styles.followingButton : null,
+              followState?.isAvailable === false ? styles.followButtonDisabled : null,
+            ]}
+            onPress={() => followMutation.mutate()}
+            disabled={followMutation.isPending || followState?.isAvailable === false}
+          >
+            <Text
+              style={[
+                styles.followButtonText,
+                followState?.isFollowing ? styles.followingButtonText : null,
+              ]}
+            >
+              {followState?.isAvailable === false
+                ? "Follow soon"
+                : followState?.isFollowing
+                  ? "Following"
+                  : "Follow"}
+            </Text>
+          </Pressable>
         </View>
+        {followState?.followerCount ? (
+          <Text style={styles.followCount}>
+            {followState.followerCount} follower{followState.followerCount === 1 ? "" : "s"}
+          </Text>
+        ) : null}
 
         <Text style={styles.shopTitle}>Seller profile</Text>
         {builder.bio ? (
@@ -330,6 +388,37 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontFamily: F.bold,
     color: COLORS.white,
+  },
+  followButton: {
+    minHeight: 44,
+    paddingHorizontal: 22,
+    borderWidth: 1,
+    borderColor: COLORS.black,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: COLORS.white,
+  },
+  followingButton: {
+    backgroundColor: COLORS.black,
+  },
+  followButtonDisabled: {
+    borderColor: COLORS.divider,
+    backgroundColor: COLORS.surface,
+  },
+  followButtonText: {
+    fontSize: 16,
+    fontFamily: F.bold,
+    color: COLORS.textPrimary,
+  },
+  followingButtonText: {
+    color: COLORS.white,
+  },
+  followCount: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontFamily: F.regular,
+    color: COLORS.textMuted,
+    marginTop: 8,
   },
   shopTitle: {
     fontSize: 17,

@@ -24,6 +24,7 @@ type ListingRow = {
   location: string | null;
   status: string | null;
   is_rare: boolean | null;
+  seller_name: string | null;
 };
 
 type GarageBikeRow = {
@@ -35,6 +36,10 @@ type GarageBikeRow = {
 type PushTokenRow = {
   user_id: string | null;
   token: string;
+};
+
+type BuilderFollowRow = {
+  follower_id: string | null;
 };
 
 function jsonResponse(body: unknown, status = 200) {
@@ -189,7 +194,7 @@ Deno.serve(async (req) => {
     const [listing] = await fetchRows<ListingRow>(
       supabaseUrl,
       serviceRoleKey,
-      `listings?id=eq.${payload.listingId}&select=id,seller_id,year,make,model,price,location,status,is_rare&limit=1`,
+      `listings?id=eq.${payload.listingId}&select=id,seller_id,year,make,model,price,location,status,is_rare,seller_name&limit=1`,
     );
 
     if (!listing) return jsonResponse({ error: "Listing not found." }, 404);
@@ -200,7 +205,7 @@ Deno.serve(async (req) => {
       return jsonResponse({ sent: 0, matchedUsers: 0, freshUsers: 0 });
     }
 
-    const [garageBikes, pushTokens] = await Promise.all([
+    const [garageBikes, pushTokens, builderFollows] = await Promise.all([
       fetchRows<GarageBikeRow>(
         supabaseUrl,
         serviceRoleKey,
@@ -210,6 +215,11 @@ Deno.serve(async (req) => {
         supabaseUrl,
         serviceRoleKey,
         "push_tokens?enabled=eq.true&select=user_id,token",
+      ),
+      fetchRows<BuilderFollowRow>(
+        supabaseUrl,
+        serviceRoleKey,
+        `builder_follows?builder_id=eq.${listing.seller_id}&select=follower_id`,
       ),
     ]);
 
@@ -238,11 +248,19 @@ Deno.serve(async (req) => {
     const matchUserIds = [...bestMatches.entries()]
       .filter(([, score]) => score < 90)
       .map(([userId]) => userId);
+    const followerUserIds = [...new Set(
+      builderFollows
+        .map((row) => row.follower_id)
+        .filter((userId): userId is string =>
+          Boolean(userId && userId !== listing.seller_id && tokensByUser.has(userId)),
+        ),
+    )];
 
     const excludedFreshUsers = new Set([
       listing.seller_id,
       ...strongMatchUserIds,
       ...matchUserIds,
+      ...followerUserIds,
     ]);
     const freshUserIds = [...tokensByUser.keys()]
       .filter((userId) => !excludedFreshUsers.has(userId));
@@ -280,6 +298,23 @@ Deno.serve(async (req) => {
       ));
     }
 
+    if (followerUserIds.length > 0) {
+      sends.push(sendExpoPush(
+        followerUserIds.flatMap((userId) => tokensByUser.get(userId) ?? []),
+        {
+          title: listing.seller_name
+            ? `${listing.seller_name} listed a bike`
+            : "Builder you follow listed a bike",
+          body: `${bikeTitle} is live now.`,
+          data: {
+            eventType: "followed_builder_listing",
+            referenceId: listing.id,
+            listingId: listing.id,
+          },
+        },
+      ));
+    }
+
     if (freshUserIds.length > 0) {
       sends.push(sendExpoPush(
         freshUserIds.flatMap((userId) => tokensByUser.get(userId) ?? []),
@@ -303,6 +338,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       sent,
       matchedUsers: strongMatchUserIds.length + matchUserIds.length,
+      followerUsers: followerUserIds.length,
       freshUsers: freshUserIds.length,
     });
   } catch (error) {

@@ -172,13 +172,15 @@ export default function GarageDetailsScreen() {
   };
 
   const scrollToBio = () => {
-    setTimeout(() => {
-      scrollRef.current?.scrollToEnd({ animated: true });
-    }, 120);
+    [120, 360].forEach((delay) => {
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }, delay);
+    });
   };
 
   return (
-    <KeyboardScreen style={styles.container}>
+    <KeyboardScreen style={styles.container} keyboardVerticalOffset={0}>
       <ScrollView
         ref={scrollRef}
         style={styles.container}

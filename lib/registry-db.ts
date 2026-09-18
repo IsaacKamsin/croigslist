@@ -155,6 +155,10 @@ type ProfileBuilderRow = {
   created_at: string | null;
 };
 
+type AcceptedSoldListingRow = {
+  listing_id: string | null;
+};
+
 // Contact details are not part of the directory. They live on profiles, which
 // is readable only by the owner and by conversation counterparties, so the way
 // to reach a seller is to message them.
@@ -310,7 +314,7 @@ function looksLikePart(listing: RegistryListing) {
     .filter(Boolean)
     .join(" ")
     .toLowerCase();
-  return [
+  const partTerms = [
     "part",
     "parts",
     "engine",
@@ -326,7 +330,9 @@ function looksLikePart(listing: RegistryListing) {
     "carburetor",
     "frame",
     "fairing",
-  ].some((term) => text.includes(term));
+  ];
+
+  return partTerms.some((term) => new RegExp(`\\b${term}\\b`).test(text));
 }
 
 async function uploadListingImages(
@@ -372,7 +378,7 @@ async function uploadListingImages(
 export async function fetchRegistryData(): Promise<RegistryData> {
   if (!isSupabaseConfigured) return emptyRegistryData;
 
-  const [listingsResult, shopsResult, profilesResult] = await Promise.all([
+  const [listingsResult, shopsResult, profilesResult, acceptedSoldResult] = await Promise.all([
     supabase
       .from("listings")
       .select(LISTING_SELECT)
@@ -389,17 +395,31 @@ export async function fetchRegistryData(): Promise<RegistryData> {
       .or("role.eq.builder,garage_name.not.is.null,bikes_count.gt.0")
       .order("created_at", { ascending: false })
       .limit(40),
+    supabase.rpc("get_accepted_sold_listing_ids"),
   ]);
 
   const listingRows = (listingsResult.error ? [] : (listingsResult.data ?? []) as ListingRow[])
     .filter(hasRealListingOwner);
+  const acceptedSoldListingIds = new Set(
+    (
+      acceptedSoldResult.error
+        ? []
+        : ((acceptedSoldResult.data ?? []) as AcceptedSoldListingRow[])
+    )
+      .map((row) => row.listing_id)
+      .filter(Boolean),
+  );
   const shopRows = (shopsResult.data ?? []) as ShopRow[];
   const profileRows = ((profilesResult.data ?? []) as ProfileBuilderRow[]).filter(
     isDirectoryBuilderProfile,
   );
 
   const activeRows = listingRows.filter((row) => row.status === "active");
-  const soldRows = listingRows.filter((row) => row.status === "sold");
+  const soldRows = listingRows.filter(
+    (row) =>
+      row.status === "sold" &&
+      acceptedSoldListingIds.has(row.id),
+  );
   const activeListings = activeRows.map(listingFromRow);
   const bikeListings = activeListings.filter((listing) => !looksLikePart(listing));
   const partListings = activeListings.filter(looksLikePart);
