@@ -725,28 +725,27 @@ export default function GarageScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
+      <ScreenHeader
+        title="SAVED BIKES"
+        right={
+          <Pressable
+            style={({ pressed }) => [
+              styles.headerCameraButton,
+              pressed && styles.headerCameraButtonPressed,
+            ]}
+            onPress={() => handleCameraUpload()}
+            accessibilityRole="button"
+            accessibilityLabel="Open camera"
+          >
+            <CameraIcon size={22} color={COLORS.textPrimary} weight="bold" />
+            <Text style={styles.headerCameraText}>ADD</Text>
+          </Pressable>
+        }
+      />
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.content}
       >
-        <ScreenHeader
-          title="SAVED BIKES"
-          right={
-            <Pressable
-              style={({ pressed }) => [
-                styles.headerCameraButton,
-                pressed && styles.headerCameraButtonPressed,
-              ]}
-              onPress={() => handleCameraUpload()}
-              accessibilityRole="button"
-              accessibilityLabel="Open camera"
-            >
-              <CameraIcon size={22} color={COLORS.textPrimary} weight="bold" />
-              <Text style={styles.headerCameraText}>ADD</Text>
-            </Pressable>
-          }
-        />
-
         {!isLoadingGarage && hasBikes && (
           <PagePad style={styles.listHeader}>
             <View>

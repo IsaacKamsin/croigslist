@@ -167,7 +167,10 @@ export default function ShopsScreen() {
           title="BUILDERS"
           right={
             <Pressable
-              style={styles.headerAction}
+              style={({ pressed }) => [
+                styles.headerAction,
+                pressed && styles.headerActionPressed,
+              ]}
               onPress={openListBikeSheet}
               accessibilityRole="button"
               accessibilityLabel="Sell a bike"
@@ -231,7 +234,22 @@ export default function ShopsScreen() {
 
   return (
     <SafeAreaView style={styles.container} edges={["top"]}>
-      <ScreenHeader title="LISTINGS" />
+      <ScreenHeader
+        title="LISTINGS"
+        right={
+          <Pressable
+            style={({ pressed }) => [
+              styles.headerAction,
+              pressed && styles.headerActionPressed,
+            ]}
+            onPress={openListBikeSheet}
+            accessibilityRole="button"
+            accessibilityLabel="List a bike"
+          >
+            <Text style={styles.headerActionText}>LIST</Text>
+          </Pressable>
+        }
+      />
 
       <FlatList
         data={rows}
@@ -254,9 +272,6 @@ export default function ShopsScreen() {
                   Active, sold, and draft bikes tied to your seller account.
                 </Text>
               </View>
-              <Pressable style={styles.addButton} onPress={openListBikeSheet}>
-                <Text style={styles.addButtonText}>+ LIST</Text>
-              </Pressable>
             </View>
           </>
         }
@@ -302,20 +317,24 @@ const styles = StyleSheet.create({
     minHeight: 360,
   },
   headerAction: {
-    minHeight: 32,
+    minWidth: 84,
+    height: 44,
+    borderRadius: 22,
     borderWidth: 1,
     borderColor: COLORS.divider,
-    borderRadius: 16,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10,
+    paddingHorizontal: 14,
     backgroundColor: COLORS.white,
   },
+  headerActionPressed: {
+    backgroundColor: COLORS.gray100,
+  },
   headerActionText: {
-    fontSize: 9,
-    lineHeight: 12,
+    fontSize: 10,
+    lineHeight: 13,
     fontFamily: F.monoBold,
-    letterSpacing: 0.8,
+    letterSpacing: 1.4,
     color: COLORS.textPrimary,
   },
   subtitle: {
@@ -337,18 +356,6 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: SPACING.md,
     marginBottom: SPACING.md,
-  },
-  addButton: {
-    backgroundColor: COLORS.black,
-    borderRadius: 24,
-    paddingHorizontal: 18,
-    paddingVertical: 11,
-  },
-  addButtonText: {
-    fontSize: 15,
-    fontFamily: F.bold,
-    letterSpacing: 0,
-    color: COLORS.white,
   },
   empty: {
     borderWidth: 1,

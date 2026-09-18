@@ -285,16 +285,16 @@ const styles = StyleSheet.create({
   mailboxTabs: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 8,
   },
   mailboxTab: {
-    minHeight: 30,
+    height: 36,
     borderWidth: 1,
     borderColor: COLORS.divider,
-    borderRadius: 999,
+    borderRadius: 18,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10,
+    paddingHorizontal: 13,
     backgroundColor: COLORS.white,
   },
   mailboxTabActive: {
@@ -302,10 +302,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.black,
   },
   mailboxTabText: {
-    fontSize: 9,
-    lineHeight: 12,
+    fontSize: 10,
+    lineHeight: 13,
     fontFamily: F.monoBold,
-    letterSpacing: 0.9,
+    letterSpacing: 1.2,
     color: COLORS.textMuted,
   },
   mailboxTabTextActive: {

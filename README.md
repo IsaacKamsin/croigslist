@@ -2,6 +2,29 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
+## Audit Discovery: Rides
+
+Rides is the lightweight MotoMingle loop inside Croigslist: see nearby rides, join a plan, coordinate with the group, and meet in real life. It should not feel like a separate social network or dating product.
+
+Current design direction:
+
+- Treat the bottom tab as `RIDES`; use `MotoMingle` only as product language inside the experience when needed.
+- Match tab-screen headers: uppercase title, white outlined pill actions, black icon/text, and shared `ScreenHeader` proportions.
+- Keep the feed direct: location/count utility row, then ride cards. Avoid hero copy, duplicate section headers, and explanatory onboarding text.
+- Use city, destination, or route imagery instead of motorcycle glamor shots. The card should sell where the ride is going.
+- Keep ride cards compact and image-led: title, date/time, route/distance, join state, capacity, and attendee proof only.
+- Avoid dated clutter: no floating chat/share buttons on the card, no heavy metadata grids, no loud green joined state, no redundant overlays.
+- Use gradient overlays for readability, not flat dark scrims.
+- Preserve Croigslist's marketplace restraint: bold typography, strong images, sparse controls, and minimal social chrome.
+
+V1 product scope:
+
+- Create a ride: photo, title, starting area, date/time, route/destination, bike/style tags, max riders.
+- Join a ride with one tap, then show the rider/profile in the attendee stack.
+- Create a temporary ride chat for attendees.
+- Show nearby/upcoming rides in a compact feed.
+- Support shareable ride links for Instagram/text.
+
 ## Get started
 
 1. Install dependencies

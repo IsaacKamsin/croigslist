@@ -12,7 +12,7 @@ import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { useQuery } from "@tanstack/react-query";
 import { Image } from "expo-image";
 import { Tabs } from "expo-router";
-import { ChatTextIcon, CurrencyDollarIcon, GarageIcon, HouseIcon, UsersIcon, UserIcon, WrenchIcon } from "phosphor-react-native";
+import { ChatTextIcon, CurrencyDollarIcon, GarageIcon, HouseIcon, UsersIcon, UsersThreeIcon, UserIcon, WrenchIcon } from "phosphor-react-native";
 import { useCallback, useMemo, useRef } from "react";
 import { Pressable, Text, View } from "react-native";
 
@@ -26,6 +26,7 @@ const TAB_ICONS: Record<string, typeof HouseIcon> = {
   shops: UsersIcon,
   vault: GarageIcon,
   messages: ChatTextIcon,
+  groups: UsersThreeIcon,
   profile: UserIcon,
 };
 
@@ -34,6 +35,7 @@ const BUILDER_TAB_ICONS: Record<string, typeof HouseIcon> = {
   shops: GarageIcon,
   vault: HouseIcon,
   messages: ChatTextIcon,
+  groups: UsersThreeIcon,
   profile: UserIcon,
 };
 
@@ -273,6 +275,7 @@ export default function TabsLayout() {
         }}
       />
       <Tabs.Screen name="messages" options={{ title: "MESSAGES" }} />
+      <Tabs.Screen name="groups" options={{ title: "RIDES" }} />
       <Tabs.Screen
         name="profile"
         options={{
